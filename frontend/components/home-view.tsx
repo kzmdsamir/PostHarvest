@@ -56,7 +56,7 @@ export function HomeView({ onTrace, onAdvanced }: HomeViewProps) {
           placeholder="https://www.facebook.com/target..."
           autoComplete="off"
           spellCheck={false}
-          className="min-w-0 flex-1 bg-transparent px-6 py-5 font-mono text-sm text-black placeholder:text-neutral-400 focus:outline-none"
+          className="min-w-0 flex-1 bg-transparent px-6 py-5 font-mono text-sm text-black placeholder:text-neutral-400 focus:outline-hidden"
         />
         <button
           type="button"

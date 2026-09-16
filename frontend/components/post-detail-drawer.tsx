@@ -49,7 +49,7 @@ function MetaItem({ label, value }: { label: string; value: string | null | unde
   return (
     <div className="min-w-0">
       <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="break-words font-mono text-xs">{value ?? "–"}</p>
+      <p className="wrap-break-word font-mono text-xs">{value ?? "–"}</p>
     </div>
   );
 }
@@ -131,12 +131,12 @@ export function PostDetailDrawer({ post, open, onClose }: PostDetailDrawerProps)
           {/* Text */}
           {post.text ? (
             <Section label="Post text">
-              <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{post.text}</p>
+              <p className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed">{post.text}</p>
             </Section>
           ) : null}
           {post.caption ? (
             <Section label="Caption">
-              <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-muted-foreground">{post.caption}</p>
+              <p className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-muted-foreground">{post.caption}</p>
             </Section>
           ) : null}
 
@@ -271,7 +271,7 @@ export function PostDetailDrawer({ post, open, onClose }: PostDetailDrawerProps)
               <div className="flex items-center gap-2">
                 {post.transcript_language ? <Badge variant="secondary">{post.transcript_language}</Badge> : null}
               </div>
-              <p className="mt-2 max-h-56 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border bg-muted/30 p-3 text-sm leading-relaxed">
+              <p className="mt-2 max-h-56 overflow-y-auto whitespace-pre-wrap wrap-break-word rounded-lg border bg-muted/30 p-3 text-sm leading-relaxed">
                 {post.transcript}
               </p>
             </Section>
