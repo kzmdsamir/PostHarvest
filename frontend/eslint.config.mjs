@@ -13,6 +13,9 @@ export default defineConfig([
   ...coreWebVitals,
   ...eslintConfigTypescript,
   {
+    settings: {
+      react: { version: "19" },
+    },
     rules: {
       "@typescript-eslint/no-explicit-any": "error",
       // These two are intentionally relaxed in this project:
