@@ -4,7 +4,7 @@
 #   python -m pip install --user -r tests/requirements.txt
 #   python -m pytest tests/ -v
 
-pytest>=8.0
+pytest>=9.1.1
 
 # NOTE (pytest-asyncio): deliberately NOT required.  The FastAPI surface under
 # test is synchronous (def routes) and background jobs run in
