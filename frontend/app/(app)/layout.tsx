@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Moon, Sun } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
-import { AuthModal } from "@/components/AuthModal";
 import { SignInScreen } from "@/components/sign-in-screen";
 import { useAuth } from "@/lib/auth-context";
 import { useTheme } from "@/components/theme-provider";
@@ -20,7 +19,6 @@ function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
   const { user, loading } = useAuth();
-  const [authOpen, setAuthOpen] = useState(false);
 
   const link = cn(
     "font-sans font-medium text-[11px] uppercase tracking-[0.2em] text-neutral-500 transition-colors hover:cursor-pointer hover:text-black"
@@ -33,57 +31,53 @@ function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
   ] as const;
 
   return (
-    <>
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-neutral-200 bg-white px-4 sm:px-8">
-        <div className="flex items-center gap-6">
-          <button
-            type="button"
-            onClick={onOpenMenu}
-            aria-label="Open navigation"
-            className="-ml-1 flex h-8 w-8 items-center justify-center rounded-none border border-neutral-200 text-neutral-500 transition-colors hover:text-black lg:hidden"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-              <path d="M1 3h12M1 7h12M1 11h12" stroke="currentColor" strokeWidth="1.5" />
-            </svg>
-          </button>
+    <header className="flex h-16 shrink-0 items-center justify-between border-b border-neutral-200 bg-white px-4 sm:px-8">
+      <div className="flex items-center gap-6">
+        <button
+          type="button"
+          onClick={onOpenMenu}
+          aria-label="Open navigation"
+          className="-ml-1 flex h-8 w-8 items-center justify-center rounded-none border border-neutral-200 text-neutral-500 transition-colors hover:text-black lg:hidden"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M1 3h12M1 7h12M1 11h12" stroke="currentColor" strokeWidth="1.5" />
+          </svg>
+        </button>
 
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(link, pathname === item.href && "text-black")}
-            >
-              {item.label}
-            </Link>
-          ))}
-        </div>
-
-        <div className="flex items-center gap-5">
-          {!loading && !user ? (
-            <button
-              type="button"
-              onClick={() => setAuthOpen(true)}
-              className="flex items-center rounded-none bg-black px-4 py-1.5 font-sans font-medium text-[11px] uppercase tracking-[0.2em] text-white transition-colors hover:bg-neutral-700"
-            >
-              Sign In
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={toggleTheme}
-            aria-label="Toggle theme"
-            className="flex h-8 w-8 items-center justify-center rounded-none border border-neutral-200 text-neutral-500 transition-colors hover:text-black"
+        {navItems.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={cn(link, pathname === item.href && "text-black")}
           >
-            {theme === "dark" ? (
-              <Sun className="h-4 w-4" strokeWidth={1.75} />
-            ) : (
-              <Moon className="h-4 w-4" strokeWidth={1.75} />
-            )}
-          </button>
-        </div>
-      </header>
-      <AuthModal isOpen={authOpen} onClose={() => setAuthOpen(false)} defaultTab="login" />
-    </>
+            {item.label}
+          </Link>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-5">
+        {!loading && !user ? (
+          <Link
+            href="/login"
+            className="flex items-center rounded-none bg-black px-4 py-1.5 font-sans font-medium text-[11px] uppercase tracking-[0.2em] text-white transition-colors hover:bg-neutral-700"
+          >
+            Sign In
+          </Link>
+        ) : null}
+        <button
+          type="button"
+          onClick={toggleTheme}
+          aria-label="Toggle theme"
+          className="flex h-8 w-8 items-center justify-center rounded-none border border-neutral-200 text-neutral-500 transition-colors hover:text-black"
+        >
+          {theme === "dark" ? (
+            <Sun className="h-4 w-4" strokeWidth={1.75} />
+          ) : (
+            <Moon className="h-4 w-4" strokeWidth={1.75} />
+          )}
+        </button>
+      </div>
+    </header>
   );
 }
 
