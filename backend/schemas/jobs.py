@@ -18,6 +18,21 @@ class ErrorDetail(BaseModel):
     message: str
 
 
+class SourceStatus(BaseModel):
+    """One row of ``sources`` in the job status response.
+
+    The dashboard renders this as the "links being scraped" box: every
+    validated URL plus its live per-source state and counters.
+    """
+
+    url: str
+    status: str
+    posts_found: int = 0
+    posts_processed: int = 0
+    error_code: str | None = None
+    error_message: str | None = None
+
+
 class JobStatusResponse(BaseModel):
     """GET /api/jobs/{job_id} response (spec §8)."""
 
@@ -37,7 +52,10 @@ class JobStatusResponse(BaseModel):
     posts_failed: int = 0
     cancel_requested: bool = False
     created_at: str | None = None
+    started_at: str | None = None
     completed_at: str | None = None
+    max_posts: int | None = None
+    sources: list[SourceStatus] = Field(default_factory=list)
 
 
 class PostOut(BaseModel):

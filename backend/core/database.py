@@ -88,11 +88,41 @@ def init_db() -> None:
 
     Alembic migrations are optional for this project; create_all is the
     documented simple path. Importing ``backend.models`` registers every model
-    on ``Base.metadata``.
+    on ``Base.metadata``. ``_migrate_additive_columns`` then folds in columns
+    that were added after a table first shipped (idempotent; safe to rerun).
     """
     from backend import models  # noqa: F401  (side effect: register models)
 
     Base.metadata.create_all(bind=engine)
+    _migrate_additive_columns()
+
+
+def _migrate_additive_columns() -> None:
+    """Additive, idempotent schema upgrades for shipped tables.
+
+    ``create_all`` never alters existing tables, so columns introduced after
+    a table first shipped on a worked database would silently be absent.
+    Inspect each table and ``ALTER TABLE ... ADD COLUMN`` only what is missing.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    _dialect = engine.dialect.name
+
+    # 2026-09-15: API supplies ETA — jobs carry a nullable started_at.
+    existing_columns = {
+        col["name"] for col in inspector.get_columns("scrape_jobs")
+    }
+    if "started_at" not in existing_columns:
+        # SQLite has no ALTER with IF NOT EXISTS; PostgreSQL accepts plain
+        # ADD COLUMN. Both are idempotent behind this existence check.
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE scrape_jobs "
+                    "ADD COLUMN started_at TIMESTAMP NULL"
+                )
+            )
 
 
 def get_db():

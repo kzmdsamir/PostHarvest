@@ -32,8 +32,8 @@ export function AuthModal({ isOpen, onClose, defaultTab = "login" }: AuthModalPr
         await signUpWithEmail(email, password);
       }
       onClose();
-    } catch (err: any) {
-      setError(err?.message || "Authentication failed. Please try again.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Authentication failed. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -45,8 +45,8 @@ export function AuthModal({ isOpen, onClose, defaultTab = "login" }: AuthModalPr
     try {
       await signInWithGoogle();
       onClose();
-    } catch (err: any) {
-      setError(err?.message || "Google sign in failed.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google sign in failed.");
     } finally {
       setSubmitting(false);
     }

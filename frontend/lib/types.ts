@@ -6,7 +6,7 @@
 
 export type PostType = "text" | "image" | "video" | "link";
 
-export type JobStatus = "queued" | "running" | "completed" | "failed";
+export type JobStatus = "queued" | "running" | "completed" | "failed" | "paused";
 
 export type ExportFormat = "json" | "csv" | "excel";
 
@@ -36,6 +36,16 @@ export interface JobErrorDetail {
   message: string;
 }
 
+/** One entry in GET /api/jobs/{id} -> sources (links being scraped) */
+export interface SourceProgress {
+  url: string;
+  status: string;
+  posts_found: number;
+  posts_processed: number;
+  error_code?: string | null;
+  error_message?: string | null;
+}
+
 /** GET /api/jobs/{id} response (fields may be null until the job reports them) */
 export interface JobProgress {
   job_id?: string | null;
@@ -47,6 +57,10 @@ export interface JobProgress {
   duplicates: number | null;
   errors: number | null;
   error_details?: JobErrorDetail[] | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  max_posts?: number | null;
+  sources?: SourceProgress[] | null;
 }
 
 /** Normalized Facebook post (single source of truth from plan.md) */
@@ -168,6 +182,7 @@ export const JOB_STATUS_LABELS: Record<JobStatus, string> = {
   running: "Running",
   completed: "Completed",
   failed: "Failed",
+  paused: "Paused",
 };
 
 export const EXPORT_FILENAMES: Record<ExportFormat, string> = {

@@ -151,6 +151,28 @@ def test_job_status_shape_when_inserted_directly(authed_client):
     assert body["posts_found"] == 2
     assert body["duplicates"] == 0
     assert "error_details" in body
+    assert body["started_at"] is not None
+    assert body["completed_at"] is None  # test helper doesn't set this
+    assert body["max_posts"] is None
+    assert len(body["sources"]) == 1
+    src = body["sources"][0]
+    assert src["status"] == "completed"
+    assert src["url"] == "https://www.facebook.com/example"
+    assert src["posts_found"] == 2
+    assert src["posts_processed"] == 2
+
+
+def test_job_status_sources_reflect_running_sources(authed_client):
+    from helpers import PAGE_URL
+
+    job_id = insert_completed_job(sample_posts(1), status="running")
+    resp = authed_client.get(f"/api/jobs/{job_id}")
+    assert resp.status_code == 200
+    src = resp.json()["sources"][0]
+    assert src["status"] == "running"
+    assert src["posts_found"] == 1
+    assert src["posts_processed"] == 0
+    assert src["url"] == PAGE_URL
 
 
 def test_posts_pagination(authed_client):

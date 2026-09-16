@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { AuthModal } from "./AuthModal";
-import { LogIn, LogOut, User as UserIcon, Shield } from "lucide-react";
+import { LogIn, LogOut, User as UserIcon } from "lucide-react";
 
 export function UserNav() {
   const { user, profile, loading, signOut } = useAuth();

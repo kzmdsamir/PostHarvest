@@ -105,6 +105,7 @@ function normalizeJob(raw: Partial<JobProgress>): JobProgress {
     rawStatus === "running" ||
     rawStatus === "queued" ||
     rawStatus === "paused";
+  const rawSources = Array.isArray(raw?.sources) ? raw.sources : [];
   return {
     job_id: raw?.job_id ?? null,
     status: known ? (rawStatus as JobProgress["status"]) : "queued",
@@ -115,6 +116,17 @@ function normalizeJob(raw: Partial<JobProgress>): JobProgress {
     duplicates: raw?.duplicates ?? null,
     errors: raw?.errors ?? null,
     error_details: raw?.error_details ?? [],
+    started_at: raw?.started_at ?? null,
+    completed_at: raw?.completed_at ?? null,
+    max_posts: raw?.max_posts ?? null,
+    sources: rawSources.map((s) => ({
+      url: s?.url ?? "",
+      status: s?.status ?? "queued",
+      posts_found: s?.posts_found ?? 0,
+      posts_processed: s?.posts_processed ?? 0,
+      error_code: s?.error_code ?? null,
+      error_message: s?.error_message ?? null,
+    })),
   };
 }
 
