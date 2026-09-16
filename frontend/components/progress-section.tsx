@@ -187,7 +187,7 @@ function ErrorListItem({ entry }: { entry: JobErrorDetail }) {
         <span className="border border-red-700/60 px-1.5 py-0.5 font-sans font-light text-[10px] uppercase tracking-[0.2em] text-red-700">
           {entry.code}
         </span>
-        <span className="min-w-0 flex-1 break-words font-sans text-sm text-neutral-700">{entry.message}</span>
+        <span className="min-w-0 flex-1 wrap-break-word font-sans text-sm text-neutral-700">{entry.message}</span>
       </div>
       {link ? (
         <p className="mt-1 truncate font-sans font-light text-[11px] text-neutral-500">

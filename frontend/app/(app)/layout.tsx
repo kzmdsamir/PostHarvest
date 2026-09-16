@@ -28,7 +28,7 @@ function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
   ] as const;
 
   return (
-    <header className="flex h-16 flex-shrink-0 items-center justify-between border-b border-neutral-200 bg-white px-4 sm:px-8">
+    <header className="flex h-16 shrink-0 items-center justify-between border-b border-neutral-200 bg-white px-4 sm:px-8">
       <div className="flex items-center gap-6">
         <button
           type="button"
@@ -94,7 +94,7 @@ export default function AppShellLayout({ children }: { children: React.ReactNode
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-black font-sans text-black antialiased">
-      <aside className="hidden flex-shrink-0 lg:block">
+      <aside className="hidden shrink-0 lg:block">
         <AppSidebar />
       </aside>
 
