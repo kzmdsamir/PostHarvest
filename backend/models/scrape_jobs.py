@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, Integer, String
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.core.database import Base
@@ -24,6 +24,12 @@ class ScrapeJob(Base):
     __tablename__ = "scrape_jobs"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
 
     pages_total: Mapped[int] = mapped_column(Integer, default=0)
@@ -55,6 +61,8 @@ class ScrapeJob(Base):
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+    owner = relationship("User", back_populates="jobs")
 
     sources = relationship(
         "ScrapeSource",

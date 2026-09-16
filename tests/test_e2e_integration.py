@@ -63,55 +63,55 @@ def _fake_raw_get(url: str) -> Tuple[int, str, str]:
 class TestEndToEnd:
     """Full pipeline integration test."""
 
-    def test_scrape_submit_returns_job(self, client):
+    def test_scrape_submit_returns_job(self, authed_client):
         """Submit a scrape request and verify a job_id is returned."""
         payload = {
             "urls": ["https://www.facebook.com/TestPage"],
             "post_type": "all",
         }
-        resp = client.post("/api/scrape", json=payload)
+        resp = authed_client.post("/api/scrape", json=payload)
         assert resp.status_code in (200, 201)
         data = resp.json()
         assert "job_id" in data
         assert data["status"] == "queued"
 
-    def test_job_status_and_posts_endpoints(self, client):
+    def test_job_status_and_posts_endpoints(self, authed_client):
         """Verify job status and posts endpoints exist and respond."""
-        resp = client.post("/api/scrape", json={
+        resp = authed_client.post("/api/scrape", json={
             "urls": ["https://www.facebook.com/TestPage"],
         })
         assert resp.status_code in (200, 201)
         job_id = resp.json()["job_id"]
 
-        resp = client.get(f"/api/jobs/{job_id}")
+        resp = authed_client.get(f"/api/jobs/{job_id}")
         assert resp.status_code == 200
 
-        resp = client.get(f"/api/jobs/{job_id}/posts")
+        resp = authed_client.get(f"/api/jobs/{job_id}/posts")
         assert resp.status_code == 200
         posts_data = resp.json()
         assert "items" in posts_data
         assert "total" in posts_data
 
-    def test_pause_resume_endpoint_exists(self, client):
-        resp = client.post("/api/scrape", json={
+    def test_pause_resume_endpoint_exists(self, authed_client):
+        resp = authed_client.post("/api/scrape", json={
             "urls": ["https://www.facebook.com/TestPage"],
         })
         job_id = resp.json()["job_id"]
 
-        resp = client.post(f"/api/jobs/{job_id}/pause")
+        resp = authed_client.post(f"/api/jobs/{job_id}/pause")
         assert resp.status_code in (200, 409)
 
-        resp = client.post(f"/api/jobs/{job_id}/resume")
+        resp = authed_client.post(f"/api/jobs/{job_id}/resume")
         assert resp.status_code in (200, 409)
 
-    def test_export_json_endpoint(self, client):
-        resp = client.post("/api/scrape", json={
+    def test_export_json_endpoint(self, authed_client):
+        resp = authed_client.post("/api/scrape", json={
             "urls": ["https://www.facebook.com/TestPage"],
         })
         assert resp.status_code in (200, 201)
         job_id = resp.json()["job_id"]
 
-        resp = client.get(f"/api/jobs/{job_id}/export/json")
+        resp = authed_client.get(f"/api/jobs/{job_id}/export/json")
         assert resp.status_code in (200, 404, 409, 202)
 
     def test_health_endpoint(self, client):

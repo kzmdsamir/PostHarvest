@@ -135,6 +135,19 @@ export interface AccountsResponse {
   total: number;
 }
 
+/** User profile returned by GET /api/auth/me */
+export interface UserProfile {
+  id: number;
+  firebase_uid: string;
+  email: string;
+  display_name: string | null;
+  photo_url: string | null;
+  is_active: boolean;
+  plan: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 /** Standard error body: {"error": {"code": "...", "message": "..."}} */
 export interface ApiErrorBody {
   error: {

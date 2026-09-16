@@ -13,7 +13,10 @@ from backend.models.posts import Post
 from backend.models.scrape_jobs import ScrapeJob
 from backend.models.sources import ScrapeSource
 
+from backend.models.user import User
+
 __all__ = [
+    "User",
     "ScrapeJob",
     "ScrapeSource",
     "CrawlState",

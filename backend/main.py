@@ -71,6 +71,9 @@ def create_app() -> FastAPI:
 
     _register_exception_handlers(app)
 
+    from backend.api import auth
+
+    app.include_router(auth.router, prefix=settings.api_prefix)
     app.include_router(scrape.router, prefix=settings.api_prefix)
     app.include_router(jobs.router, prefix=settings.api_prefix)
     app.include_router(accounts.router, prefix=settings.api_prefix)

@@ -14,7 +14,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from backend.auth.dependencies import get_current_user
 from backend.core.database import get_db
+from backend.models.user import User
 from backend.schemas.scrape import ScrapeRequest, ScrapeResponse
 from backend.services.job_service import start_scrape_job
 
@@ -30,7 +32,8 @@ router = APIRouter(tags=["scrape"])
 def create_job(
     payload: ScrapeRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ScrapeResponse:
     """Validate the submitted URLs and queue the background scraping job."""
-    job = start_scrape_job(db, payload)
+    job = start_scrape_job(db, payload, owner_id=current_user.id)
     return ScrapeResponse(job_id=job.id, status="queued")

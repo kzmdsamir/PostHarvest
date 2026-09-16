@@ -110,7 +110,7 @@ def count_posts_for_job(job_id: str) -> int:
 
 
 def build_export(
-    db: Session, job_id: str, fmt: str, base_dir: str | None = None
+    db: Session, job_id: str, fmt: str, base_dir: str | None = None, owner_id: int | None = None
 ) -> Path:
     """Generate an export file and record it; returns the file path."""
     if fmt not in EXPORT_FORMATS:
@@ -120,7 +120,10 @@ def build_export(
             code="invalid_input",
         )
 
-    job = db.get(ScrapeJob, job_id)
+    stmt = select(ScrapeJob).where(ScrapeJob.id == job_id)
+    if owner_id is not None:
+        stmt = stmt.where(ScrapeJob.owner_id == owner_id)
+    job = db.scalar(stmt)
     if job is None:
         raise NotFoundError(f"Job {job_id} not found")
     if job.status in ("queued", "running"):

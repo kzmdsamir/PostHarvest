@@ -8,6 +8,7 @@ import { BookOpen, ChevronDown, History, Home, KeyRound, Moon, ScanLine, Setting
 import { DOCS_SECTIONS } from "@/lib/docs-meta";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/theme-provider";
+import { UserNav } from "@/components/UserNav";
 
 function NavLink({
   href,
@@ -127,10 +128,6 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
 
-  // "Home" and "Investigation" are fresh-slate screens: if the current URL
-  // carries piped-in query params (?url= from Home, ?job= from History), strip
-  // them even when the path is already correct so each screen resets instead
-  // of re-opening a stale run or target.
   const stripPipedParams = (href: string) => {
     if (pathname === href && typeof window !== "undefined") {
       const searchParams = new URLSearchParams(window.location.search);
@@ -152,6 +149,8 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
         <DocsDropdown onNavigate={onNavigate} />
         <NavLink href="/settings" label="Settings" icon={Settings} onClick={onNavigate} />
       </nav>
+
+      <UserNav />
 
       <div className="border-t border-neutral-800 px-4 py-3 space-y-2">
         <div className="flex items-center justify-between">
