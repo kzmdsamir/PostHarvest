@@ -98,9 +98,24 @@ Live status + progress + recent errors (max 50).
   "error_details": [],
   "posts_skipped": 0, "posts_failed": 0,
   "cancel_requested": false,
-  "created_at": "…", "completed_at": null
+  "created_at": "…", "completed_at": null,
+  "started_at": "…", "max_posts": 10,
+  "sources": [
+    {
+      "url": "https://www.facebook.com/…",
+      "status": "running",
+      "posts_found": 10, "posts_processed": 10,
+      "error_code": null, "error_message": null
+    }
+  ]
 }
 ```
+
+`started_at` (set when the job first enters `running`) powers the client ETA;
+`max_posts` (from the submitted options) powers the discovery-phase percentage
+heuristic; `sources` lists every validated URL being scraped with its live
+per-source state and counters (the dashboard's "links being scraped" box). Both
+`started_at` and `sources` are additive and safe for strict clients.
 
 #### `GET /api/jobs/{job_id}/posts`
 

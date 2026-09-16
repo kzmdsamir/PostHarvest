@@ -335,6 +335,8 @@ def _run_job_inner(job_id: str, token: CancelToken | None) -> None:
             return  # deleted or cancelled before the worker started
         job.status = "running"
         job.updated_at = _now()
+        if job.started_at is None:
+            job.started_at = _now()
         options_snapshot: dict = job.options or {}
         db.commit()
 
