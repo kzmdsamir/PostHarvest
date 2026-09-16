@@ -7,7 +7,7 @@
 # are listed here as well. Keep the pinned set minimal and compatible.
 
 fastapi==0.115.12
-uvicorn==0.34.0
+uvicorn==0.52.4
 sqlalchemy==2.0.40
 pydantic==2.10.6
 pydantic-settings==2.7.1
