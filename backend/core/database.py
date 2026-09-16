@@ -124,6 +124,22 @@ def _migrate_additive_columns() -> None:
                 )
             )
 
+    # 2026-09-17: user roles (ops/user) for accounts + admin tiers.
+    user_columns = {col["name"] for col in inspector.get_columns("users")}
+    if "role" not in user_columns:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE users "
+                    "ADD COLUMN role VARCHAR(32) NOT NULL DEFAULT 'user'"
+                )
+            )
+    # The tier rollout renamed the effective default plan "free" -> "basic".
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE users SET plan = 'basic' WHERE plan = 'free' OR plan IS NULL")
+        )
+
 
 def get_db():
     """FastAPI dependency yielding a request-scoped session."""

@@ -1,106 +1,188 @@
 """Saved Facebook session (cookie) accounts endpoints.
 
-* GET    /api/accounts                 — list saved sessions from the credentials index
-* DELETE /api/accounts/{account_name}  — remove a saved session (cookies + index entry)
+Two scopes (locked decision, 2026-09-17):
 
-Built on top of browser_scraper's credentials helpers; never reads cookie
-contents, only metadata (name, file, saved_at).
+* ``ops`` — the global cookie pool maintained by the operator via the CLI
+  (``cli.py login --account``) or the ops role. Any signed-in user may list
+  and *use* ops sessions; only the ops role may delete them.
+* ``me`` — per-user sessions stored under ``data/personal/{uid}/``. Visible,
+  usable and deletable only by their owner. Personal sessions are captured
+  server-side via :func:`~backend.scraper.browser_scraper.login_with_credentials`
+  (the "+" flow in Saved Accounts); the Facebook password is never stored.
+
+Endpoints
+---------
+* GET    /api/accounts                      — ``{ops: [...], mine: [...]}`` (authed)
+* POST   /api/accounts/personal             — label + FB credentials → server-side
+                                              login, save a personal session (authed)
+* DELETE /api/accounts/{scope}/{name}       — remove a session (scope + role gated)
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
+from fastapi import APIRouter, Depends, Response, status
+from sqlalchemy.orm import Session
 
-from fastapi import APIRouter, Response
-
-from backend.core.exceptions import NotFoundError
+from backend.auth.dependencies import get_current_user
+from backend.core.database import get_db
+from backend.core.exceptions import AppError, NotFoundError
+from backend.core.plans import personal_account_cap
+from backend.models.user import User
+from backend.schemas.accounts import (
+    AccountOut,
+    AccountsResponse,
+    PersonalLoginRequest,
+)
 from backend.scraper.browser_scraper import (
-    CREDENTIALS_PATH,
-    load_credentials,
+    account_metadata,
+    delete_account,
+    get_cookie_status,
+    list_accounts,
+    login_with_credentials,
 )
 
 router = APIRouter(tags=["accounts"])
 
 
-def _normalize_name(name: str) -> str:
-    # Account names are stored verbatim (they are CLI --account values).
-    return name.strip()
+def _normalize_scope(scope: str) -> str:
+    scope = scope.strip().lower()
+    if scope not in ("ops", "me"):
+        raise AppError(
+            "Account scope must be 'ops' or 'me'",
+            status_code=400,
+            code="invalid_scope",
+        )
+    return scope
 
 
-def _account_dict(name: str, entry: dict) -> dict:
-    cookies_file = entry.get("cookies_file") if isinstance(entry, dict) else None
-    return {
-        "name": name,
-        "cookies_file": cookies_file,
-        "saved_at": entry.get("saved_at") if isinstance(entry, dict) else None,
-    }
+def _account_out(item: dict, scope: str, owner_id: int | None = None) -> AccountOut:
+    return AccountOut(
+        name=item["name"],
+        scope=scope,
+        saved_at=item.get("saved_at"),
+        cookies_file=item.get("cookies_file"),
+        status=get_cookie_status(item["name"], owner_id=owner_id),
+    )
 
 
 @router.get(
     "/accounts",
-    summary="List saved Facebook sessions",
+    response_model=AccountsResponse,
+    summary="List saved Facebook sessions (ops pool + my own)",
 )
-def list_accounts() -> dict:
-    """Return the saved sessions (metadata only, never cookies)."""
-    creds = load_credentials()
-    items = [_account_dict(name, entry) for name, entry in creds.items()]
+def list_saved_accounts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AccountsResponse:
+    """List operator-maintained sessions and the caller's personal sessions.
 
-    # The default session saved via `login` without --account lives in the
-    # plain fb_cookies.json and is not part of the credentials index; surface
-    # it as an implicit "default" account.
-    default_path = CREDENTIALS_PATH.parent / "fb_cookies.json"
-    if default_path.exists() and "default" not in creds:
-        items.append(
-            {
-                "name": "default",
-                "cookies_file": "fb_cookies.json",
-                "saved_at": datetime.now(timezone.utc).isoformat(),
-            }
+    Metadata only — cookie contents are never returned. A caller always sees
+    the full ops pool (shared) but only their own ``me`` sessions.
+    """
+    ops_items = [_account_out(item, "ops") for item in account_metadata()]
+    mine_items = [
+        _account_out(item, "me", owner_id=current_user.id)
+        for item in account_metadata(owner_id=current_user.id)
+    ]
+    return AccountsResponse(ops=ops_items, mine=mine_items)
+
+
+@router.post(
+    "/accounts/personal",
+    response_model=AccountOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add my own Facebook session via server-side login",
+)
+def add_personal_account(
+    payload: PersonalLoginRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AccountOut:
+    """Run a headless Facebook login on the user's behalf and save the
+    resulting session cookies under the caller's personal store.
+
+    The Facebook credentials are used once and never persisted. Login
+    failures (checkpoint / timeout / wrong password) return 502.
+    """
+    name = payload.name.strip()
+    if not name:
+        raise AppError("Account name cannot be empty", status_code=400, code="invalid_input")
+
+    cap = personal_account_cap(current_user.plan)
+    if cap is not None and len(list_accounts(owner_id=current_user.id)) >= cap:
+        raise AppError(
+            f"Your {current_user.plan} plan allows {cap} personal account(s); "
+            "delete one or upgrade to add more",
+            status_code=429,
+            code="plan_limit",
         )
-        items.sort(key=lambda item: item["name"])
-    return {
-        "items": items,
-        "total": len(items),
-    }
+
+    ok = login_with_credentials(
+        email=payload.email,
+        password=payload.password,
+        owner_id=current_user.id,
+        account_name=name,
+    )
+    if not ok:
+        raise AppError(
+            "Facebook login failed (wrong credentials, checkpoint, or timeout). "
+            "Please try again.",
+            status_code=502,
+            code="facebook_login_failed",
+        )
+
+    # Re-read so the response reflects what was actually stored.
+    item = next((i for i in account_metadata(owner_id=current_user.id) if i["name"] == name), None)
+    if item is None:
+        raise AppError(
+            "Login reported success but cookies were not saved",
+            status_code=500,
+            code="cookie_save_failed",
+        )
+    return _account_out(item, "me", owner_id=current_user.id)
 
 
 @router.delete(
-    "/accounts/{account_name}",
-    status_code=204,
+    "/accounts/{scope}/{account_name}",
+    status_code=status.HTTP_204_NO_CONTENT,
     summary="Remove a saved Facebook session",
 )
-def delete_account(
+def remove_account(
+    scope: str,
     account_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> Response:
-    """Delete the session's cookies file and credentials-index entry."""
-    name = _normalize_name(account_name)
-    creds = load_credentials()
-    if name not in creds:
-        # The default session may be implicit (plain fb_cookies.json without an
-        # index entry); allow deleting it that way too.
-        if name == "default":
-            default_path = CREDENTIALS_PATH.parent / "fb_cookies.json"
-            if not default_path.exists():
-                raise NotFoundError(f"Account '{name}' not found")
-            default_path.unlink(missing_ok=True)
-            return Response(status_code=204)
-        raise NotFoundError(f"Account '{name}' not found")
+    """Delete an account's cookies + index entry.
 
-    data_dir: Path = CREDENTIALS_PATH.parent
-    entry = creds[name]
-    cookies_file = entry.get("cookies_file") if isinstance(entry, dict) else None
-    if cookies_file:
-        target = data_dir / cookies_file
-        if target.exists():
-            target.unlink()
+    * scope ``me``  -> owner-only (any authenticated user, their own sessions)
+    * scope ``ops`` -> ops role required (operator-managed pool)
+    """
+    return _delete_for_scope(
+        scope=_normalize_scope(scope),
+        name=account_name,
+        current_user=current_user,
+        is_ops=current_user.role == "ops",
+    )
 
-    del creds[name]
-    if creds:
-        with open(CREDENTIALS_PATH, "w", encoding="utf-8") as f:
-            import json
 
-            json.dump(creds, f, indent=2, ensure_ascii=False)
+def _delete_for_scope(scope: str, name: str, current_user: User, is_ops: bool) -> Response:
+    """Shared delete body — validates scope/role, then removes the session."""
+    name = name.strip()
+    if not name:
+        raise AppError("Account name cannot be empty", status_code=400, code="invalid_input")
+
+    if scope == "ops":
+        if not is_ops:
+            raise AppError(
+                "Only operators may delete ops-pool sessions",
+                status_code=403,
+                code="admin_required",
+            )
+        removed = delete_account(name, owner_id=None)
     else:
-        CREDENTIALS_PATH.unlink(missing_ok=True)
+        # "me" — the caller may only touch their own personal sessions.
+        removed = delete_account(name, owner_id=current_user.id)
 
+    if not removed:
+        raise NotFoundError(f"Account '{name}' not found")
     return Response(status_code=204)

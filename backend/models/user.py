@@ -23,7 +23,8 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     photo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    plan: Mapped[str] = mapped_column(String(32), default="free", nullable=False)
+    plan: Mapped[str] = mapped_column(String(32), default="basic", nullable=False)
+    role: Mapped[str] = mapped_column(String(32), default="user", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

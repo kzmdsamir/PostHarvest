@@ -5,6 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Moon, Sun } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
+import { SignInScreen } from "@/components/sign-in-screen";
+import { useAuth } from "@/lib/auth-context";
 import { useTheme } from "@/components/theme-provider";
 import { cn } from "@/lib/utils";
 
@@ -80,6 +82,7 @@ function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
  */
 export default function AppShellLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { user, loading } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -91,6 +94,21 @@ export default function AppShellLayout({ children }: { children: React.ReactNode
   useEffect(() => {
     setMenuOpen(false);
   }, [pathname]);
+
+  // Hard login gate: the docs stay public; every other route in the app shell
+  // requires a Firebase session. While Firebase restores its session we show a
+  // splash so the shell doesn't flash signed-out.
+  const isPublicDocs = pathname === "/docs" || pathname.startsWith("/docs/");
+  if (loading) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-zinc-950">
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-neutral-700 border-t-white" />
+      </div>
+    );
+  }
+  if (!user && !isPublicDocs) {
+    return <SignInScreen />;
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-black font-sans text-black antialiased">

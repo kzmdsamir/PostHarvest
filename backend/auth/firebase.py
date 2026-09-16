@@ -31,7 +31,7 @@ def _init_firebase() -> firebase_admin.App:
         private_key = settings.firebase_private_key.replace("\\n", "\n")
         cred = credentials.Certificate({
             "type": "service_account",
-            "project_id": settings.firebase_project_id or "postharvest-5a5bb",
+            "project_id": settings.firebase_project_id or "postharvest-firebase",
             "client_email": settings.firebase_client_email,
             "private_key": private_key,
             "token_uri": "https://oauth2.googleapis.com/token",
@@ -57,7 +57,7 @@ def _init_firebase() -> firebase_admin.App:
     # 3. Fallback to default application credentials if available
     try:
         cred = credentials.ApplicationDefault()
-        _app = firebase_admin.initialize_app(cred, {"projectId": settings.firebase_project_id or "postharvest-5a5bb"})
+        _app = firebase_admin.initialize_app(cred, {"projectId": settings.firebase_project_id or "postharvest-firebase"})
         logger.info("Firebase Admin initialized via Application Default Credentials")
         return _app
     except Exception as exc:

@@ -143,13 +143,15 @@ export function UrlInputCard({
     if (saved.useBrowser) setUseBrowser(true);
   }, []);
 
-  // Load the saved sessions for the account dropdown.
+  // Load the saved sessions for the account dropdown (ops pool + my own).
   useEffect(() => {
     let cancelled = false;
     api
       .listAccounts()
       .then((res) => {
-        if (!cancelled) setAccounts(res.items);
+        if (!cancelled) {
+          setAccounts([...(res.ops ?? []), ...(res.mine ?? [])]);
+        }
       })
       .catch(() => {
         // Backend unreachable — dropdown just stays on "anonymous".
@@ -419,15 +421,16 @@ export function UrlInputCard({
                 >
                   <option value="">Anonymous (no saved session)</option>
                   {accounts.map((entry) => (
-                    <option key={entry.name} value={entry.name}>
-                      {entry.name}
+                    <option key={`${entry.scope}:${entry.name}`} value={`${entry.scope}:${entry.name}`}>
+                      {entry.scope === "me" ? "me" : "ops"} / {entry.name}
                       {entry.saved_at ? ` · saved ${formatDateTime(entry.saved_at)}` : ""}
+                      {entry.status === "VALID" ? "" : " · expired"}
                     </option>
                   ))}
                 </Select>
                 <p className="mt-1.5 font-sans text-xs leading-relaxed text-neutral-500">
-                  Cookies unlock the full feed; anonymous sessions are capped by Facebook. Add more with {" "}
-                  <code className="font-mono">python cli.py login --account NAME</code>.
+                  Cookies unlock the full feed; anonymous sessions are capped by Facebook. Operators maintain the{" "}
+                  <code className="font-mono">ops</code> pool; add your own from Saved Sessions.
                 </p>
               </div>
               <div>

@@ -32,3 +32,7 @@ alembic>=1.13,<2
 
 # --- Firebase Authentication ------------------------------------------------
 firebase-admin>=6.5,<7
+
+# --- at-rest encryption of personal Facebook sessions ------------------------
+# Fernet-encrypts per-user cookie files when COOKIE_ENCRYPTION_KEY is set.
+cryptography==50.0.1

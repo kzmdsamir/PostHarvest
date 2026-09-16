@@ -319,16 +319,23 @@ npm run dev   # http://localhost:3000`}</Pre>
       </P>
       <H2>Saving a session</H2>
       <P>
-        Log in once with your own account in a visible browser:
+        Two kinds of sessions exist. Operator-managed sessions are shared by every user and saved from the CLI:
       </P>
       <Pre>{`python cli.py login --account default`}</Pre>
       <P>
-        Cookies are stored in <Code>data/fb_cookies.json</Code> (or <Code>data/fb_cookies_&lt;name&gt;.json</Code> for
-        named accounts) and never uploaded anywhere. A credentials index keeps only metadata.
+        Your own personal sessions are added in the dashboard instead: <Code>Saved sessions → Add my session</Code>.
+        That signs you into Facebook once in a headless browser; only the session cookies are stored with your account
+        (encrypted at rest, never the password), and your plan caps how many you can keep.
+      </P>
+      <P>
+        Cookies are stored under <Code>data/</Code> for the operator pool, or{" "}
+        <Code>data/personal/&#123;user&#125;/</Code> for personal sessions, and never uploaded anywhere. A credentials
+        index keeps only metadata.
       </P>
       <H2>Using sessions</H2>
       <ul className="list-disc space-y-1 pl-5">
-        <Li>Dashboard: enable Browser mode, type the account name into the <Code>Saved account</Code> field.</Li>
+        <Li>Dashboard: enable Browser mode and pick the session from the <Code>Saved account</Code> dropdown —{" "}
+          <Code>me/</Code> entries are your own sessions, <Code>ops/</Code> are operator-managed and shared.</Li>
         <Li>CLI: pass <Code>--account</Code>, or comma-separate several to rotate across URLs.</Li>
         <Li>
           List sessions with <Code>python cli.py accounts</Code>; review or remove them on the{" "}
@@ -342,8 +349,9 @@ npm run dev   # http://localhost:3000`}</Pre>
       </P>
       <H2>API</H2>
       <P>
-        <Code>GET /api/accounts</Code> returns session metadata, <Code>DELETE /api/accounts/&#123;name&#125;</Code> deletes a
-        session. Cookie contents are never exposed over the API.
+        <Code>GET /api/accounts</Code> returns session metadata split into the shared <Code>ops</Code> pool and your
+        <Code>me</Code> sessions; <Code>DELETE /api/accounts/&#123;scope&#125;/&#123;name&#125;</Code> removes one. Cookie
+        contents are never exposed over the API.
       </P>
     </>
   ),

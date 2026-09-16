@@ -6,13 +6,16 @@
  * text (we never use dangerouslySetInnerHTML anywhere in this app).
  */
 import type {
+  AccountSession,
   AccountsResponse,
+  AdminUser,
   ApiErrorBody,
   ExportFormat,
   JobListResponse,
   JobProgress,
   JobStatus,
   PaginatedPosts,
+  PersonalLoginRequest,
   Post,
   ScrapeRequest,
   ScrapeResponse,
@@ -87,6 +90,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       }
     } catch {
       // Non-JSON error body — keep the generic message.
+    }
+
+    // Stale/expired session → hard redirect to the login page (app routes are
+    // gated; the login page itself must never bounce on its own 401s).
+    if (
+      response.status === 401 &&
+      typeof window !== "undefined" &&
+      window.location.pathname !== "/login" &&
+      ["auth_required", "invalid_token", "account_disabled", "expired_id_token"].includes(code)
+    ) {
+      window.location.replace("/login");
     }
     throw new ApiError({ status: response.status, code, message });
   }
@@ -230,9 +244,17 @@ export const api = {
     return request<JobListResponse>(`/api/jobs${suffix}`);
   },
 
-  /** GET /api/accounts — saved sessions (metadata only, no cookie contents). */
+  /** GET /api/accounts — saved sessions split by tier (ops pool + my own). */
   async listAccounts(): Promise<AccountsResponse> {
     return request<AccountsResponse>("/api/accounts");
+  },
+
+  /** POST /api/accounts/personal — server-side Facebook login for a personal session. */
+  async addPersonalAccount(payload: PersonalLoginRequest): Promise<AccountSession> {
+    return request<AccountSession>("/api/accounts/personal", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
 
   /** GET /api/auth/me */
@@ -240,9 +262,34 @@ export const api = {
     return request<UserProfile>("/api/auth/me");
   },
 
-  /** DELETE /api/accounts/{name} — remove a saved session. */
-  async deleteAccount(name: string): Promise<void> {
-    return request<void>(`/api/accounts/${encodeURIComponent(name)}`, { method: "DELETE" });
+  /** DELETE /api/accounts/{scope}/{name} — remove a saved session (ops role gates the ops scope). */
+  async deleteAccount(scope: string, name: string): Promise<void> {
+    return request<void>(`/api/accounts/${encodeURIComponent(scope)}/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+  },
+
+  // --- operator admin (ops role only; backend returns 403 otherwise) ---------
+
+  /** GET /api/admin/users */
+  async adminListUsers(): Promise<AdminUser[]> {
+    return request<AdminUser[]>("/api/admin/users");
+  },
+
+  /** PATCH /api/admin/users/{id}/role */
+  async adminSetRole(userId: number, role: string): Promise<AdminUser> {
+    return request<AdminUser>(`/api/admin/users/${userId}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    });
+  },
+
+  /** PATCH /api/admin/users/{id}/plan */
+  async adminSetPlan(userId: number, plan: string): Promise<AdminUser> {
+    return request<AdminUser>(`/api/admin/users/${userId}/plan`, {
+      method: "PATCH",
+      body: JSON.stringify({ plan }),
+    });
   },
 };
 

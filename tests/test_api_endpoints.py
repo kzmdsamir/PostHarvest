@@ -304,13 +304,16 @@ def test_list_jobs_pagination(authed_client):
     assert len(resp2.json()["items"]) == 1
 
 
-def test_list_accounts_empty_and_404_delete(client):
-    resp = client.get("/api/accounts")
+def test_list_accounts_empty_and_404_delete(authed_client, client):
+    resp = client.get("/api/accounts")  # unauthenticated -> 401
+    assert resp.status_code == 401
+
+    resp = authed_client.get("/api/accounts")
     assert resp.status_code == 200
     body = resp.json()
-    assert "items" in body and "total" in body
+    assert "ops" in body and "mine" in body
 
-    resp_delete = client.delete("/api/accounts/ghost")
+    resp_delete = authed_client.delete("/api/accounts/me/ghost")
     assert resp_delete.status_code == 404
     error_envelope(resp_delete.json())
 

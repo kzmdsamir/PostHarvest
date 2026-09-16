@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { AuthModal } from "./AuthModal";
+import { PLAN_LABELS } from "@/lib/types";
 import { LogIn, LogOut, User as UserIcon } from "lucide-react";
 
 export function UserNav() {
@@ -64,7 +65,7 @@ export function UserNav() {
             </p>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="inline-flex items-center px-1.5 py-0.2 text-[9px] font-semibold tracking-wider text-blue-400 bg-blue-500/10 rounded uppercase">
-                {profile?.plan || "Free"} Plan
+                {PLAN_LABELS[profile?.plan ?? ""] ?? "Free"} Plan
               </span>
             </div>
           </div>

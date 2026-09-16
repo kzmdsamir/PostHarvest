@@ -136,18 +136,46 @@ export interface JobListResponse {
   page_size: number;
 }
 
-/** Metadata row in GET /api/accounts */
+/** Metadata row in GET /api/accounts (namespaced ops pool or personal). */
 export interface AccountSession {
   name: string;
+  scope: "ops" | "me";
   cookies_file?: string | null;
   saved_at?: string | null;
+  status?: "VALID" | "EXPIRED" | null;
 }
 
-/** GET /api/accounts response */
+/** GET /api/accounts response — ops pool + your own sessions. */
 export interface AccountsResponse {
-  items: AccountSession[];
-  total: number;
+  ops: AccountSession[];
+  mine: AccountSession[];
 }
+
+/** Request body for POST /api/accounts/personal (server-side Facebook login). */
+export interface PersonalLoginRequest {
+  name: string;
+  email: string;
+  password: string;
+}
+
+/** One row in GET /api/admin/users (ops role only). */
+export interface AdminUser {
+  id: number;
+  email: string | null;
+  display_name: string | null;
+  plan: string;
+  role: string;
+  is_active: boolean;
+  created_at: string | null;
+}
+
+export const PLAN_LABELS: Record<string, string> = {
+  basic: "Basic",
+  pro: "Pro",
+  enterprise: "Enterprise",
+};
+
+export type PlanName = "basic" | "pro" | "enterprise";
 
 /** User profile returned by GET /api/auth/me */
 export interface UserProfile {
@@ -158,6 +186,7 @@ export interface UserProfile {
   photo_url: string | null;
   is_active: boolean;
   plan: string;
+  role: string;
   created_at: string | null;
   updated_at: string | null;
 }

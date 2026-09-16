@@ -16,7 +16,8 @@ class UserOut(BaseModel):
     email: str | None = None
     display_name: str | None = None
     photo_url: str | None = None
-    plan: str = "free"
+    plan: str = "basic"
+    role: str = "user"
     is_active: bool = True
 
     class Config:

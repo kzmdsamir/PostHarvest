@@ -31,7 +31,8 @@ def test_auth_me_returns_user_profile(authed_client):
     data = resp.json()
     assert data["firebase_uid"] == "test_firebase_uid_user_a"
     assert data["email"] == "user_a@example.com"
-    assert data["plan"] == "free"
+    assert data["plan"] == "basic"
+    assert data["role"] == "user"
 
 
 def test_multitenancy_job_isolation(authed_client, client):
