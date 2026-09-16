@@ -59,7 +59,7 @@ const SCROLL_ROUND_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
 ];
 
 const FIELD_INPUT_CLASS =
-  "h-9 rounded-none border border-black bg-white font-sans text-sm tracking-normal text-black placeholder:text-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400";
+  "h-9 rounded-none border border-black bg-white font-sans text-sm tracking-normal text-black placeholder:text-neutral-400 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-neutral-400";
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
@@ -101,7 +101,7 @@ function ToggleGroup<T extends string>({
             disabled={disabled}
             aria-pressed={active}
             className={cn(
-              "-ml-px border px-3 py-1.5 font-sans text-xs font-medium normal-case transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 first:ml-0",
+              "-ml-px border px-3 py-1.5 font-sans text-xs font-medium normal-case transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-neutral-400 first:ml-0",
               index > 0 && "-ml-px",
               active
                 ? "border-black bg-black text-white"
@@ -262,7 +262,7 @@ export function UrlInputCard({
           placeholder={"https://www.facebook.com/examplepage"}
           disabled={disabled}
           rows={4}
-          className="mt-2 w-full resize-y rounded-none border border-black bg-white p-4 font-mono text-sm tracking-normal text-black placeholder:text-neutral-400 focus:outline-none focus:ring-0"
+          className="mt-2 w-full resize-y rounded-none border border-black bg-white p-4 font-mono text-sm tracking-normal text-black placeholder:text-neutral-400 focus:outline-hidden focus:ring-0"
         />
         <p className="mt-2 font-mono text-[10px] uppercase tracking-widest text-neutral-400">
           Paste one Facebook public page or profile URL per line

@@ -271,7 +271,7 @@ export function PostsTable({ posts, total, loading, loaded, error, onRetry, onSe
                         {post.page_id ? <p className="truncate text-xs text-muted-foreground">ID {post.page_id}</p> : null}
                       </td>
                       <td className="max-w-[300px] px-3 py-3">
-                        <p className="line-clamp-2 break-words text-muted-foreground">
+                        <p className="line-clamp-2 wrap-break-word text-muted-foreground">
                           {post.text ?? post.caption ?? <span className="italic">No text</span>}
                         </p>
                       </td>

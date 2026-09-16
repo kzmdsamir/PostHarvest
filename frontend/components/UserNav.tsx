@@ -27,7 +27,7 @@ export function UserNav() {
               setModalTab("login");
               setModalOpen(true);
             }}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-lg transition-colors shadow-sm"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-lg transition-colors shadow-xs"
           >
             <LogIn className="w-3.5 h-3.5" />
             <span>Sign In</span>
