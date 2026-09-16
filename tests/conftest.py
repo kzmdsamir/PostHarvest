@@ -82,6 +82,7 @@ _CLEANUP_MODELS = (
     "Post",
     "ScrapeSource",
     "ScrapeJob",
+    "User",
 )
 
 
@@ -97,6 +98,71 @@ def client():
 
 
 @pytest.fixture(autouse=True)
+def _patch_firebase_verify(monkeypatch):
+    """Patch verify_id_token to accept test tokens without hitting Firebase network."""
+    def mock_verify(token: str):
+        if token in ("garbage", "invalid", "bad-token") or not token.startswith(("test_", "user_")):
+            from backend.core.exceptions import AppError
+            raise AppError("Invalid token", status_code=401, code="invalid_token")
+        if token.startswith("user_b_token") or token == "test_firebase_token_b":
+            return {
+                "uid": "test_firebase_uid_user_b",
+                "email": "user_b@example.com",
+                "name": "User B",
+            }
+        return {
+            "uid": "test_firebase_uid_user_a",
+            "email": "user_a@example.com",
+            "name": "User A",
+        }
+
+    monkeypatch.setattr("backend.auth.firebase.verify_id_token", mock_verify)
+    monkeypatch.setattr("backend.auth.dependencies.verify_id_token", mock_verify)
+
+
+@pytest.fixture
+def auth_headers():
+    return {"Authorization": "Bearer test_firebase_token_a"}
+
+
+@pytest.fixture
+def auth_headers_b():
+    return {"Authorization": "Bearer user_b_token"}
+
+
+@pytest.fixture
+def authed_client(client, auth_headers):
+    """TestClient wrapper that automatically includes Authorization header."""
+    class AuthedClient:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def _merge_headers(self, headers):
+            h = dict(auth_headers)
+            if headers:
+                h.update(headers)
+            return h
+
+        def get(self, url, **kwargs):
+            kwargs["headers"] = self._merge_headers(kwargs.get("headers"))
+            return self.inner.get(url, **kwargs)
+
+        def post(self, url, **kwargs):
+            kwargs["headers"] = self._merge_headers(kwargs.get("headers"))
+            return self.inner.post(url, **kwargs)
+
+        def delete(self, url, **kwargs):
+            kwargs["headers"] = self._merge_headers(kwargs.get("headers"))
+            return self.inner.delete(url, **kwargs)
+
+        def put(self, url, **kwargs):
+            kwargs["headers"] = self._merge_headers(kwargs.get("headers"))
+            return self.inner.put(url, **kwargs)
+
+    return AuthedClient(client)
+
+
+@pytest.fixture(autouse=True)
 def _clean_database():
     """Wipe every table between tests for deterministic isolation."""
     yield
@@ -108,4 +174,4 @@ def _clean_database():
     with SessionLocal() as db:
         for name in _CLEANUP_MODELS:
             db.execute(delete(getattr(m, name)))
-        db.commit()
+        db.commit()

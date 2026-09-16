@@ -25,6 +25,10 @@ brotli==1.2.0
 # python driver alone cannot render pages without the browser binary.
 playwright==1.62.0
 
-# --- PostgreSQL driver (used by both dev and prod) ---------------------------------
-# DATABASE_URL is set by docker-compose to point at the postgres service.
+# --- PostgreSQL driver & database migrations ---------------------------------
+# DATABASE_URL / SUPABASE_DB_URL is set by docker-compose or environment.
 psycopg[binary]==3.2.9
+alembic>=1.13,<2
+
+# --- Firebase Authentication ------------------------------------------------
+firebase-admin>=6.5,<7

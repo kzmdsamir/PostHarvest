@@ -13,7 +13,9 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from backend.auth.dependencies import get_current_user
 from backend.core.database import get_db
+from backend.models.user import User
 from backend.services.export_service import build_export
 
 router = APIRouter(tags=["exports"])
@@ -36,6 +38,7 @@ _ExportFormat = Literal["json", "csv", "excel"]
     summary="Download job results as JSON/CSV/XLSX",
     responses={
         200: {"description": "File download"},
+        401: {"description": "Authentication required"},
         404: {"description": "Unknown job"},
         409: {"description": "Job still running"},
         500: {"description": "Export failed / module unavailable"},
@@ -45,9 +48,10 @@ def download_export(
     job_id: str,
     fmt: _ExportFormat,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> FileResponse:
     """Generate (or reuse) the export file and stream it to the client."""
-    path = build_export(db, job_id, fmt)
+    path = build_export(db, job_id, fmt, owner_id=current_user.id)
     # Filename prefix uses the hex job id — safe to interpolate.
     return FileResponse(
         path=str(path),

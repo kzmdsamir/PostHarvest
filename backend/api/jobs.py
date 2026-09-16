@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
+from backend.auth.dependencies import get_current_user
 from backend.core.config import get_settings
 from backend.core.database import get_db
 from backend.core.exceptions import AppError, NotFoundError
@@ -23,6 +24,7 @@ from backend.models.errors import ScrapeError
 from backend.models.posts import Post
 from backend.models.scrape_jobs import ScrapeJob
 from backend.models.sources import ScrapeSource
+from backend.models.user import User
 from backend.schemas.jobs import (
     ErrorDetail,
     JobListResponse,
@@ -38,8 +40,11 @@ from backend.services import serialization, stats as stats_service
 router = APIRouter(tags=["jobs"])
 
 
-def _get_job_or_404(db: Session, job_id: str) -> ScrapeJob:
-    job = db.get(ScrapeJob, job_id)
+def _get_job_or_404(db: Session, job_id: str, owner_id: int | None = None) -> ScrapeJob:
+    stmt = select(ScrapeJob).where(ScrapeJob.id == job_id)
+    if owner_id is not None:
+        stmt = stmt.where(ScrapeJob.owner_id == owner_id)
+    job = db.scalar(stmt)
     if job is None:
         raise NotFoundError(f"Job {job_id} not found")
     return job
@@ -54,14 +59,23 @@ def list_jobs(
     page: int = Query(1, ge=1, description="1-based page number"),
     page_size: int = Query(25, ge=1, le=100, description="Items per page (max 100)"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> JobListResponse:
-    """Return job history, newest first."""
+    """Return job history for current user, newest first."""
     settings = get_settings()
     page_size = min(page_size, settings.page_size_max)
 
-    total = int(db.scalar(select(func.count()).select_from(ScrapeJob)) or 0)
+    total = int(
+        db.scalar(
+            select(func.count())
+            .select_from(ScrapeJob)
+            .where(ScrapeJob.owner_id == current_user.id)
+        )
+        or 0
+    )
     jobs = db.scalars(
         select(ScrapeJob)
+        .where(ScrapeJob.owner_id == current_user.id)
         .order_by(ScrapeJob.created_at.desc(), ScrapeJob.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -98,9 +112,10 @@ def list_jobs(
 def get_job_status(
     job_id: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> JobStatusResponse:
     """Return the job's state machine position, counters and recent errors."""
-    job = _get_job_or_404(db, job_id)
+    job = _get_job_or_404(db, job_id, owner_id=current_user.id)
     error_rows = db.scalars(
         select(ScrapeError)
         .where(ScrapeError.job_id == job_id)
@@ -163,9 +178,10 @@ def list_posts(
     page: int = Query(1, ge=1, description="1-based page number"),
     page_size: int = Query(50, ge=1, le=200, description="Items per page (max 200)"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> PostPageResponse:
     """Return extracted posts for the job, newest first, paginated."""
-    _get_job_or_404(db, job_id)
+    _get_job_or_404(db, job_id, owner_id=current_user.id)
     settings = get_settings()
     page_size = min(page_size, settings.page_size_max)
 
@@ -198,9 +214,11 @@ def list_posts(
 def get_job_stats(
     job_id: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> JobStatsResponse:
     """Return KPI aggregates (totals by type and engagement) for the job."""
-    return JobStatsResponse(**stats_service.aggregate_job_stats(db, job_id))
+    _get_job_or_404(db, job_id, owner_id=current_user.id)
+    return JobStatsResponse(**stats_service.aggregate_job_stats(db, job_id, owner_id=current_user.id))
 
 
 @router.delete(
@@ -211,23 +229,21 @@ def get_job_stats(
 def delete_job(
     job_id: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> Response:
-    """Request cancellation, wait briefly for the worker, then delete rows.
-
-    Cancellation is best-effort: the worker receives a cancel event it checks
-    between sources (the event is also forwarded to ``scrape_source`` so an
-    in-flight pagination loop can stop). After up to ``cancel_wait_seconds``
-    the job and all dependent rows are deleted (ON DELETE CASCADE); a worker
-    still running afterwards simply finds the rows gone and stops writing.
-    """
-    job = _get_job_or_404(db, job_id)
+    """Request cancellation, wait briefly for the worker, then delete rows."""
+    job = _get_job_or_404(db, job_id, owner_id=current_user.id)
     job.cancel_requested = True
     db.commit()
 
     manager = JobManager.get()
     manager.cancel(job.id, wait_seconds=get_settings().cancel_wait_seconds)
 
-    db.execute(delete(ScrapeJob).where(ScrapeJob.id == job_id))
+    db.execute(
+        delete(ScrapeJob).where(
+            ScrapeJob.id == job_id, ScrapeJob.owner_id == current_user.id
+        )
+    )
     db.commit()
     return Response(status_code=204)
 
@@ -240,10 +256,11 @@ def delete_job(
 def pause_job(
     job_id: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     """Pause a running/queued job.  The worker will stop after the current
     source completes.  Returns the updated job status."""
-    job = _get_job_or_404(db, job_id)
+    job = _get_job_or_404(db, job_id, owner_id=current_user.id)
     if job.status not in ("queued", "running"):
         raise AppError(
             f"Cannot pause job in status '{job.status}'",
@@ -263,10 +280,11 @@ def pause_job(
 def resume_job(
     job_id: str,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     """Resume a paused job.  The worker will pick up where it left off
     using the CrawlState checkpoint.  Returns the updated job status."""
-    job = _get_job_or_404(db, job_id)
+    job = _get_job_or_404(db, job_id, owner_id=current_user.id)
     if job.status != "paused":
         raise AppError(
             f"Cannot resume job in status '{job.status}'",

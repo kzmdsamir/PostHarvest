@@ -70,7 +70,14 @@ services:
     container_name: postharvest-backend
     init: true
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postharvest}:${POSTGRES_PASSWORD:-postharvest}@postgres:5432/${POSTGRES_DB:-postharvest}
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/postharvest.db}
+      SUPABASE_DB_URL: ${SUPABASE_DB_URL:-}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-postharvest-5a5bb}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL:-}
+      FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY:-}
       DATA_DIR: ${DATA_DIR:-/app/data}
       EXPORT_BASE_DIR: ${EXPORT_BASE_DIR:-/app/data/exports}
       WORKER_THREADS: ${WORKER_THREADS:-4}
@@ -83,15 +90,11 @@ services:
       SCRAPER_MAX_RETRIES: ${SCRAPER_MAX_RETRIES:-3}
       SCRAPER_ROBOTS: ${SCRAPER_ROBOTS:-1}
       COOKIE_ENCRYPTION_KEY: ${COOKIE_ENCRYPTION_KEY:-}
-      POSTGRES_HOST: postgres
     volumes:
       # Bind-mount the repo data/ dir so the CLI (host) and the container share
       # the same cookie store / exports. Keep the file layout identical to
       # local `cli.py login` (data/fb_cookies_*.json, data/exports/...).
       - ../data:/app/data
-    depends_on:
-      postgres:
-        condition: service_healthy
     healthcheck:
       # python:3.13-slim has no curl/wget; urllib is guaranteed present.
       test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)"]
@@ -121,6 +124,12 @@ services:
         # requires a rebuild.
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
         NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://postharvest.space}
+        NEXT_PUBLIC_FIREBASE_API_KEY: ${NEXT_PUBLIC_FIREBASE_API_KEY:-}
+        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:-}
+        NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${NEXT_PUBLIC_FIREBASE_PROJECT_ID:-postharvest-5a5bb}
+        NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ${NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET:-}
+        NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:-}
+        NEXT_PUBLIC_FIREBASE_APP_ID: ${NEXT_PUBLIC_FIREBASE_APP_ID:-}
     image: postharvest-frontend:latest
     container_name: postharvest-frontend
     init: true
@@ -141,34 +150,7 @@ services:
     networks:
       - web
 
-  # =====================================================================
-  # postgres — shared multi-tenant store (dev AND prod)
-  # =====================================================================
-  postgres:
-    image: postgres:16-alpine
-    container_name: postharvest-postgres
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postharvest}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postharvest}
-      POSTGRES_DB: ${POSTGRES_DB:-postharvest}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postharvest} -d ${POSTGRES_DB:-postharvest}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    restart: unless-stopped
-    networks:
-      - isolated
-    # No exposed host port is required to function; uncomment for pgAdmin/
-    # local debugging only.
-    # ports:
-    #   - "5432:5432"
-
 volumes:
-  pgdata:
   certbot-www:
   certbot-conf:
 

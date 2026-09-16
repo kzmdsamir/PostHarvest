@@ -36,7 +36,7 @@ class Base(DeclarativeBase):
 
 def _build_engine() -> Engine:
     settings = get_settings()
-    url = settings.database_url.strip()
+    url = (settings.supabase_db_url or settings.database_url).strip()
     kwargs: dict = {"pool_pre_ping": True}
 
     if url.startswith("sqlite"):

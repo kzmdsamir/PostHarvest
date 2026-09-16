@@ -230,7 +230,7 @@ def validate_and_collect_urls(raw_urls: list[str]) -> tuple[list[dict], list[dic
     return valid, invalid
 
 
-def start_scrape_job(db, request: ScrapeRequest) -> ScrapeJob:
+def start_scrape_job(db, request: ScrapeRequest, owner_id: int | None = None) -> ScrapeJob:
     """Validate URLs, persist job + sources + validation errors, queue worker.
 
     Raises :class:`InvalidInputError` (400) when no valid URL remains after
@@ -269,6 +269,7 @@ def start_scrape_job(db, request: ScrapeRequest) -> ScrapeJob:
 
     job = ScrapeJob(
         id=job_id,
+        owner_id=owner_id,
         status="queued",
         pages_total=len(valid),
         options=options,
