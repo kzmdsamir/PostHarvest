@@ -6,7 +6,7 @@
 # layer (backend/scraper) but the application needs them at runtime, so they
 # are listed here as well. Keep the pinned set minimal and compatible.
 
-fastapi==0.115.12
+fastapi==0.141.1
 uvicorn==0.52.4
 sqlalchemy==2.0.40
 pydantic==2.10.6
