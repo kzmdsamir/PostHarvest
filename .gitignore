@@ -67,9 +67,13 @@ DECISIONS.md
 .pytest-tmp/
 browser_posts.json
 posts.json
-posts.xlsxnohup.out
-
-
-# customs
+posts.xlsx
+reports/
+fix-bugs-*.json
 nohup.out
 inspo/
+
+# Firebase service account credentials
+serviceAccountKey.json
+*firebase-adminsdk*.json
+

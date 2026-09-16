@@ -283,6 +283,7 @@ def insert_completed_job(
     pages_total: int = 1,
     pages_completed: int = 1,
     options: dict | None = None,
+    owner_id: int | None = None,
 ) -> str:
     """Seed a job + sources + posts directly through the models.
 
@@ -292,13 +293,27 @@ def insert_completed_job(
     from sqlalchemy.orm import Session
 
     from backend.core.database import SessionLocal
-    from backend.models import EngagementMetric, Media, Post, ScrapeJob, ScrapeSource
+    from backend.models import EngagementMetric, Media, Post, ScrapeJob, ScrapeSource, User
 
     posts_list = list(posts)
     job_id = secrets.token_hex(8)
     with SessionLocal() as db:  # type: Session
+        if owner_id is None:
+            user = db.query(User).filter_by(firebase_uid="test_firebase_uid_user_a").first()
+            if not user:
+                user = User(
+                    firebase_uid="test_firebase_uid_user_a",
+                    email="user_a@example.com",
+                    display_name="User A",
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+            owner_id = user.id
+
         job = ScrapeJob(
             id=job_id,
+            owner_id=owner_id,
             status=status,
             pages_total=pages_total,
             pages_completed=pages_completed,

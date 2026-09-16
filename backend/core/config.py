@@ -43,6 +43,18 @@ class Settings(BaseSettings):
     data_dir: str = "./data"
     export_base_dir: str = "./data/exports"
 
+    # --- supabase --------------------------------------------------------------
+    supabase_url: str | None = None
+    supabase_db_url: str | None = None
+    supabase_anon_key: str | None = None
+    supabase_service_key: str | None = None
+
+    # --- firebase authentication ------------------------------------------------
+    firebase_project_id: str | None = "postharvest-5a5bb"
+    firebase_client_email: str | None = None
+    firebase_private_key: str | None = None
+    firebase_credentials_path: str | None = None
+
     # --- worker / job manager ---------------------------------------------------
     worker_threads: int = 4
     max_urls_per_job: int = 100

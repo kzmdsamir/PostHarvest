@@ -30,23 +30,18 @@ from helpers import (
 )
 
 
-def _start(client, *, post_type="text", urls=None, **extra):
+def _start(authed_client, *, post_type="text", urls=None, **extra):
     payload = {"urls": urls or [PAGE_URL]}
     if post_type is not None:
         payload["post_type"] = post_type
     payload.update(extra)
-    resp = client.post("/api/scrape", json=payload)
+    resp = authed_client.post("/api/scrape", json=payload)
     assert resp.status_code == 201, resp.text
     return resp.json()["job_id"]
 
 
-def test_queued_running_completed_with_progress(client, monkeypatch):
-    """Full happy path: progress_cb drives live counters, the job completes.
-
-    Expected final counters (spec §17 + stats convention):
-        posts_found=4, posts_processed=3, duplicates=1, posts_skipped=1,
-        posts_failed=0, errors=0, pages_completed=1.
-    """
+def test_queued_running_completed_with_progress(authed_client, monkeypatch):
+    """Full happy path: progress_cb drives live counters, the job completes."""
     posts = sample_posts(3)
     stats = {
         "posts_discovered": 4,
@@ -72,15 +67,15 @@ def test_queued_running_completed_with_progress(client, monkeypatch):
         options_seen=options_seen,
     )
 
-    job_id = _start(client)
+    job_id = _start(authed_client)
     # queued (or already running) immediately after POST
-    queued = client.get(f"/api/jobs/{job_id}").json()
+    queued = authed_client.get(f"/api/jobs/{job_id}").json()
     assert queued["status"] in ("queued", "running")
 
     # Live progress must be visible: the second ping (found=4) persisted.
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        body = client.get(f"/api/jobs/{job_id}").json()
+        body = authed_client.get(f"/api/jobs/{job_id}").json()
         if body["posts_found"] >= 4:
             break
         time.sleep(0.05)
@@ -89,28 +84,22 @@ def test_queued_running_completed_with_progress(client, monkeypatch):
     assert body["status"] == "running"
 
     gate.set()
-    final = wait_for_job(client, job_id)
+    final = wait_for_job(authed_client, job_id)
     assert final["status"] == "completed"
     assert final["pages_total"] == 1
     assert final["pages_completed"] == 1
     assert len(options_seen) == 1 and isinstance(options_seen[0], ScrapeOptions)
 
-    # ---- contract assertions (currently FAIL — see bug report) -----------
     assert final["posts_found"] == 4
-    assert final["posts_processed"] == 3, (
-        "Sources reported 3 extracted posts; job processed counter must "
-        "equal the stored post count"
-    )
+    assert final["posts_processed"] == 3
     assert final["duplicates"] == 1
     assert final["posts_skipped"] == 1
     assert final["posts_failed"] == 0
     assert final["errors"] == 0
-    # stats invariant: discovered == extracted + skipped + failed
     assert final["posts_found"] == (
         final["posts_processed"] + final["posts_skipped"] + final["posts_failed"]
     )
-    # posts must actually be persisted and listable
-    r = client.get(f"/api/jobs/{job_id}/posts")
+    r = authed_client.get(f"/api/jobs/{job_id}/posts")
     assert r.status_code == 200 and r.json()["total"] == 3
     stored = r.json()["items"]
     assert stored[0]["page_name"] == "Example Page"
@@ -118,45 +107,35 @@ def test_queued_running_completed_with_progress(client, monkeypatch):
     assert {p["post_type"] for p in stored} == {"text", "image", "video"}
 
 
-def test_default_flow_without_post_type(client, monkeypatch):
-    """No post_type supplied -> API default is "all".  The scraper's own
-    ScrapeOptions only accepts text|image|video|link, so the worker must map
-    the default to something valid and the job must complete with its posts.
-    (Currently FAIL — see bug report: ScrapeOptions rejects "all".)"""
+def test_default_flow_without_post_type(authed_client, monkeypatch):
     posts = sample_posts(2)
     install_fake_scraper(
         monkeypatch,
         results=[make_source_result(PAGE_URL, posts=posts)],
     )
-    job_id = _start(client, post_type=None)
-    final = wait_for_job(client, job_id)
+    job_id = _start(authed_client, post_type=None)
+    final = wait_for_job(authed_client, job_id)
     assert final["status"] == "completed"
-    assert final["errors"] == 0, (
-        f"default flow must not raise scraper errors, got {final['error_details']}"
-    )
+    assert final["errors"] == 0
     assert final["posts_processed"] == 2
 
 
-def test_source_failure_still_completes_job(client, monkeypatch):
-    """A source that raises with a typed scraper code is recorded and the job
-    still completes."""
+def test_source_failure_still_completes_job(authed_client, monkeypatch):
     from backend.scraper.errors import RateLimited
 
     def _raising(url, options=None, progress_cb=None, cancel_event=None):
         raise RateLimited("simulated rate limit")
 
     install_fake_scraper(monkeypatch, result_factory=_raising)
-    job_id = _start(client, urls=[PAGE_URL])
-    final = wait_for_job(client, job_id)
+    job_id = _start(authed_client, urls=[PAGE_URL])
+    final = wait_for_job(authed_client, job_id)
     assert final["status"] == "completed"
     assert final["errors"] >= 1
     codes = {e["code"] for e in final["error_details"]}
     assert "rate_limited" in codes
 
 
-def test_source_result_errors_recorded_job_completes(client, monkeypatch):
-    """Per-source errors reported inside a SourceResult must be persisted and
-    counted; the job still completes.  (Currently FAIL — see bug report.)"""
+def test_source_result_errors_recorded_job_completes(authed_client, monkeypatch):
     posts = sample_posts(2)
     install_fake_scraper(
         monkeypatch,
@@ -177,8 +156,8 @@ def test_source_result_errors_recorded_job_completes(client, monkeypatch):
             )
         ],
     )
-    job_id = _start(client)
-    final = wait_for_job(client, job_id)
+    job_id = _start(authed_client)
+    final = wait_for_job(authed_client, job_id)
     assert final["status"] == "completed"
     assert final["errors"] == 1
     assert final["error_details"][0]["code"] == "extraction_failure"
@@ -186,17 +165,13 @@ def test_source_result_errors_recorded_job_completes(client, monkeypatch):
     assert final["posts_failed"] == 1
 
 
-def test_cancellation_blocks_then_delete_204_404(client, monkeypatch):
-    """A scraper that blocks on the cancel_event: DELETE returns 204 and the
-    job is gone afterwards.  The DELETE route waits for the worker, so by the
-    time 204 is returned the rows are gone (best-effort cancellation)."""
+def test_cancellation_blocks_then_delete_204_404(authed_client, monkeypatch):
     install_fake_scraper(
         monkeypatch, result_factory=blocking_scraper(None)
     )
-    job_id = _start(client)
-    # give the worker time to enter the blocking scraper
+    job_id = _start(authed_client)
     time.sleep(0.3)
-    resp = client.delete(f"/api/jobs/{job_id}")
+    resp = authed_client.delete(f"/api/jobs/{job_id}")
     assert resp.status_code == 204, resp.text
-    assert client.get(f"/api/jobs/{job_id}").status_code == 404
-    assert client.get(f"/api/jobs/{job_id}/posts").status_code == 404
+    assert authed_client.get(f"/api/jobs/{job_id}").status_code == 404
+    assert authed_client.get(f"/api/jobs/{job_id}/posts").status_code == 404

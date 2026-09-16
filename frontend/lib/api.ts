@@ -16,6 +16,7 @@ import type {
   Post,
   ScrapeRequest,
   ScrapeResponse,
+  UserProfile,
 } from "./types";
 
 /** Resolved at build time. Defaults to the local backend. */
@@ -44,15 +45,29 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    ...(init?.headers as Record<string, string> ?? {}),
+  };
+
+  try {
+    const { auth } = await import("./firebase");
+    if (auth.currentUser && !headers["Authorization"]) {
+      const token = await auth.currentUser.getIdToken();
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+    }
+  } catch {
+    // Ignore firebase import errors if running in SSR / build phase
+  }
+
   try {
     response = await fetch(`${API_BASE}${path}`, {
       cache: "no-store",
       ...init,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        ...(init?.headers ?? {}),
-      },
+      headers,
     });
   } catch {
     throw new ApiError({
@@ -206,6 +221,11 @@ export const api = {
   /** GET /api/accounts — saved sessions (metadata only, no cookie contents). */
   async listAccounts(): Promise<AccountsResponse> {
     return request<AccountsResponse>("/api/accounts");
+  },
+
+  /** GET /api/auth/me */
+  async getProfile(): Promise<UserProfile> {
+    return request<UserProfile>("/api/auth/me");
   },
 
   /** DELETE /api/accounts/{name} — remove a saved session. */

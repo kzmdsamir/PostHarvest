@@ -20,10 +20,9 @@ from helpers import (
 )
 
 
-def test_per_post_errors_recorded_and_job_completes(client, monkeypatch):
+def test_per_post_errors_recorded_and_job_completes(authed_client, monkeypatch):
     """One good post + one post-error entry: job completes with errors==1 and
-    the entry surfaced in error_details.  (Currently FAIL — see bug report:
-    SourceResult.errors are dropped by job_service.)"""
+    the entry surfaced in error_details."""
     posts = sample_posts(1)
     install_fake_scraper(
         monkeypatch,
@@ -48,12 +47,12 @@ def test_per_post_errors_recorded_and_job_completes(client, monkeypatch):
             )
         ],
     )
-    resp = client.post(
+    resp = authed_client.post(
         "/api/scrape", json={"urls": [PAGE_URL], "post_type": "text"}
     )
     assert resp.status_code == 201
     job_id = resp.json()["job_id"]
-    final = wait_for_job(client, job_id)
+    final = wait_for_job(authed_client, job_id)
     assert final["status"] == "completed"
     assert final["errors"] == 1, f"errors not counted: {final}"
     assert final["posts_failed"] == 1
@@ -61,10 +60,9 @@ def test_per_post_errors_recorded_and_job_completes(client, monkeypatch):
     assert final["error_details"][0]["post_url"]
 
 
-def test_scraper_unavailable_returns_503(client, monkeypatch):
+def test_scraper_unavailable_returns_503(authed_client, monkeypatch):
     """backend.scraper missing its required symbols -> POST /api/scrape 503
-    with the scraper_unavailable envelope.  Done by replacing the module in
-    sys.modules (the app lazily imports it at call time)."""
+    with the scraper_unavailable envelope."""
     fake = types.ModuleType("backend.scraper")
     fake.__file__ = "<phantom>"
     fake.__package__ = "backend"
@@ -74,7 +72,7 @@ def test_scraper_unavailable_returns_503(client, monkeypatch):
     monkeypatch.setitem(sys.modules, "backend.scraper", fake)
     monkeypatch.setattr(backend_pkg, "scraper", fake, raising=False)
 
-    resp = client.post(
+    resp = authed_client.post(
         "/api/scrape", json={"urls": [PAGE_URL], "post_type": "text"}
     )
     assert resp.status_code == 503, f"expected 503, got {resp.status_code}: {resp.text}"
@@ -82,33 +80,33 @@ def test_scraper_unavailable_returns_503(client, monkeypatch):
     assert err["code"] == "scraper_unavailable"
 
 
-def test_export_unknown_job_404_envelope(client):
-    resp = client.get("/api/jobs/ghost/export/json")
+def test_export_unknown_job_404_envelope(authed_client):
+    resp = authed_client.get("/api/jobs/ghost/export/json")
     assert resp.status_code == 404
     err = error_envelope(resp.json())
     assert err["code"] == "not_found"
 
 
-def test_validation_errors_are_json_envelopes(client):
+def test_validation_errors_are_json_envelopes(authed_client):
     # malformed JSON body -> FastAPI 400 shim with the envelope
-    resp = client.post(
+    resp = authed_client.post(
         "/api/scrape", content=b"{not json", headers={"content-type": "application/json"}
     )
     assert resp.status_code == 400
     error_envelope(resp.json())
 
 
-def test_jobs_get_errors_shown_in_status(client, monkeypatch):
+def test_jobs_get_errors_shown_in_status(authed_client, monkeypatch):
     install_fake_scraper(
         monkeypatch,
         results=[make_source_result(PAGE_URL, posts=sample_posts(1))],
     )
-    resp = client.post(
+    resp = authed_client.post(
         "/api/scrape",
         json={"urls": [PAGE_URL, "https://example.com/not-facebook"], "post_type": "text"},
     )
     job_id = resp.json()["job_id"]
-    final = wait_for_job(client, job_id)
+    final = wait_for_job(authed_client, job_id)
     # the invalid submitted URL is a validation-time error row
     codes = {e["code"] for e in final["error_details"]}
     assert "invalid_url" in codes

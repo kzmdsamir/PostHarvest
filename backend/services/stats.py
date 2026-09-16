@@ -16,9 +16,12 @@ from backend.models.scrape_jobs import ScrapeJob
 from backend.services.serialization import iso_format
 
 
-def aggregate_job_stats(db: Session, job_id: str) -> dict:
-    """Return a KPI dict for a job (404 when the job is unknown)."""
-    job = db.get(ScrapeJob, job_id)
+def aggregate_job_stats(db: Session, job_id: str, owner_id: int | None = None) -> dict:
+    """Return a KPI dict for a job (404 when the job is unknown or not owned)."""
+    stmt = select(ScrapeJob).where(ScrapeJob.id == job_id)
+    if owner_id is not None:
+        stmt = stmt.where(ScrapeJob.owner_id == owner_id)
+    job = db.scalar(stmt)
     if job is None:
         raise NotFoundError(f"Job {job_id} not found")
 
