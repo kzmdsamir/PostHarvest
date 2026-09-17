@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, type HTMLAttributes, type ReactNode } from "react";
+import { useEffect, useState, type HTMLAttributes, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "./button";
@@ -28,6 +29,12 @@ const sizeClasses: Record<NonNullable<DialogProps["size"]>, string> = {
  * Closes on ESC or backdrop click; locks body scroll while open.
  */
 export function Dialog({ open, onClose, title, description, children, footer, size = "md", className }: DialogProps) {
+  // Render into a portal on <body> so no ancestor can hijack `position: fixed`
+  // (a retained animation transform on the page container would otherwise
+  // become the dialog's containing block and break centering).
+  const [isClient, setIsClient] = useState(false);
+  useEffect(() => setIsClient(true), []);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -42,11 +49,12 @@ export function Dialog({ open, onClose, title, description, children, footer, si
     };
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || !isClient) return null;
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ display: "flex", alignItems: "center", justifyContent: "center" }}
       role="dialog"
       aria-modal="true"
       aria-label={title ?? "Dialog"}
@@ -58,7 +66,7 @@ export function Dialog({ open, onClose, title, description, children, footer, si
       />
       <div
         className={cn(
-          "relative z-10 flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-lg border bg-popover text-popover-foreground animate-dialog-in sm:rounded-lg",
+          "relative z-10 flex max-h-[86dvh] w-full flex-col overflow-hidden rounded-t-lg border bg-popover text-popover-foreground animate-dialog-in sm:rounded-lg",
           sizeClasses[size],
           className
         )}
@@ -83,7 +91,8 @@ export function Dialog({ open, onClose, title, description, children, footer, si
         <div className="flex-1 overflow-y-auto px-6 py-4">{children}</div>
         {footer ? <div className="border-t px-6 py-3">{footer}</div> : null}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
