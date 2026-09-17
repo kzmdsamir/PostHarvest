@@ -101,7 +101,7 @@ Status snapshot: 2026-09-17. Legend: **✅** done to this stage · **⬜** pendi
 
 ## Who did what
 
-- Reza — reza1234khan1234@gmail.com — core scraper, API + CLI, frontend, Docker tooling, docs (92 commits)
-- Claude — n/a (AI assistant) — release tooling, promote script, CI fixes, CONTRIBUTING/CoC/templates, this TODO
-- Kazi Samir — kzsamir849@gmail.com — earlier foundation work, superseded (31 commits)
-- dependabot[bot] — 49699333+dependabot[bot]@users.noreply.github.com — automated dependency bumps (16 commits)
+- Reza — reza1234khan1234@gmail.com — core development
+- Claude — n/a (AI assistant) — release tooling, docs
+- Kazi Samir — kzsamir849@gmail.com — earlier foundation work
+- dependabot[bot] — 49699333+dependabot[bot]@users.noreply.github.com — dependency bumps
