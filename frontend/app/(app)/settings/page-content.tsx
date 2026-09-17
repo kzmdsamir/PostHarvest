@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { AlertCircle, Check, RefreshCw, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
-import { useTheme } from "@/components/theme-provider";
+import { useTheme } from "@/components/common/ThemeProvider";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";

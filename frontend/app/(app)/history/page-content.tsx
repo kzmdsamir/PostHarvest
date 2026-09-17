@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, RefreshCw } from "lucide-react";
-import { Eyebrow, PageHeading } from "@/components/display";
+import { Eyebrow, PageHeading } from "@/components/views/Display";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";

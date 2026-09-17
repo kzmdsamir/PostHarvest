@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { HomeView } from "@/components/home-view";
+import { HomeView } from "@/components/views/HomeView";
 
 const HOW_IT_WORKS: ReadonlyArray<{ title: string; body: string }> = [
   {

@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Jost } from "next/font/google";
 import "./globals.css";
-import { ThemeProvider } from "@/components/theme-provider";
+import { ThemeProvider } from "@/components/common/ThemeProvider";
 import { AuthProvider } from "@/lib/auth-context";
 
 const jost = Jost({
