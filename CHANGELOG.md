@@ -1,3 +1,19 @@
+# [1.1.0](https://github.com/teampostharvest/postharvest/compare/v1.0.1...v1.1.0) (2026-09-17)
+
+
+### Bug Fixes
+
+* **auth:** handle PEM formatting for Firebase Admin SDK private key and fallback gracefully ([d6c3747](https://github.com/teampostharvest/postharvest/commit/d6c374704cc3106eef9e082b66012f87a57435bf))
+* **docker:** add prod nginx TLS and frontend build args ([93d0039](https://github.com/teampostharvest/postharvest/commit/93d003943af82d3943f158ba0d31c9cf7d1284e0))
+* **docker:** re-resolve nginx upstreams at runtime ([de5a846](https://github.com/teampostharvest/postharvest/commit/de5a846072349de08ea23baca4605e4b38eb0c00))
+* **frontend:** clone shared defaults in readScrapeDefaults ([1c3e512](https://github.com/teampostharvest/postharvest/commit/1c3e512b790575330cdd26ba9485a561883176e0))
+* **frontend:** resolve eslint error and unused import warnings ([771e791](https://github.com/teampostharvest/postharvest/commit/771e791747e49e7c94931ee2c0a9df06b5324312))
+
+
+### Features
+
+* **pricing:** add Team tier and refresh plan limits ([3b1b2ce](https://github.com/teampostharvest/postharvest/commit/3b1b2ce473f96850d17d22ca0a5271821099ad49))
+
 ## [1.0.1](https://github.com/teampostharvest/postharvest/compare/v1.0.0...v1.0.1) (2026-09-17)
 
 
