@@ -11,9 +11,9 @@ import { useTheme } from "@/components/theme-provider";
 import { cn } from "@/lib/utils";
 
 /**
- * White topbar — flat Jost nav split between Home / Investigation / History:
- * bg-white, border-b neutral-200, links font-sans font-medium text-[11px]
- * uppercase tracking-[0.2em] text-neutral-500 hover:text-black.
+ * White topbar — flat Jost nav split between Home / Investigation / Pricing /
+ * History: bg-white, border-b neutral-200, links font-sans font-medium
+ * text-[11px] uppercase tracking-[0.2em] text-neutral-500 hover:text-black.
  */
 function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const pathname = usePathname();
@@ -27,6 +27,7 @@ function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const navItems = [
     { href: "/", label: "Home" },
     { href: "/investigation", label: "Investigation" },
+    { href: "/pricing", label: "Pricing" },
     { href: "/history", label: "History" },
   ] as const;
 

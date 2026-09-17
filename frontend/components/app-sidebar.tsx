@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { BookOpen, ChevronDown, History, Home, KeyRound, ScanLine, Settings } from "lucide-react";
+import { BookOpen, ChevronDown, CreditCard, History, Home, KeyRound, ScanLine, Settings } from "lucide-react";
 import { DOCS_SECTIONS } from "@/lib/docs-meta";
 import { cn } from "@/lib/utils";
 import { UserNav } from "@/components/UserNav";
@@ -142,6 +142,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
       <nav className="flex-1 overflow-y-auto">
         <NavLink href="/" label="Home" icon={Home} onClick={goHome} />
         <NavLink href="/investigation" label="Investigation" icon={ScanLine} onClick={goInvestigation} />
+        <NavLink href="/pricing" label="Pricing" icon={CreditCard} onClick={onNavigate} />
         <NavLink href="/history" label="History" icon={History} onClick={onNavigate} />
         <NavLink href="/accounts" label="Saved accounts" icon={KeyRound} onClick={onNavigate} />
         <DocsDropdown onNavigate={onNavigate} />
