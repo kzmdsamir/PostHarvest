@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import secrets
 import subprocess
@@ -931,14 +932,27 @@ def _capture_worker(record: dict, timeout_seconds: float) -> None:
                     "--remote-debugging-address=0.0.0.0",
                     f"--user-data-dir={profile}",
                     "--no-sandbox",
+                    "--headless=new",
                     "--disable-blink-features=AutomationControlled",
                     "--disable-dev-shm-usage",
+                    # The crashpad handler cannot start under the hardened
+                    # container (dropped caps) and its failure CHECK-crashes
+                    # Chromium at boot — disable crash reporting entirely.
+                    "--disable-crash-reporter",
                     "--no-first-run",
                     "--no-default-browser-check",
                     "about:blank",
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                # Chromium's crashpad needs a writable HOME; the non-root
+                # container user's HOME is not, which made the browser
+                # SIGTRAP-crash at boot. Set HOME into the throwaway profile.
+                env={
+                    **os.environ,
+                    "HOME": profile,
+                    "XDG_CONFIG_HOME": os.path.join(profile, ".config"),
+                },
             )
 
             cdp_base = f"http://127.0.0.1:{port}"
