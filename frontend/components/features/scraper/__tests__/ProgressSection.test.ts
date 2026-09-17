@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeEtaSeconds, computePercent, formatEta } from "@/components/progress-section";
+import { computeEtaSeconds, computePercent, formatEta } from "@/components/features/scraper/ProgressSection";
 import type { JobProgress } from "@/lib/types";
 
 function makeJob(overrides: Partial<JobProgress> = {}): JobProgress {
