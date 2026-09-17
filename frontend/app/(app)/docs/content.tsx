@@ -144,7 +144,8 @@ npm run dev   # http://localhost:3000`}</Pre>
       </P>
       <H2>4. Export the results</H2>
       <P>
-        When the run completes, download the dataset. Use <Code>JSON</Code> for machine processing, <Code>CSV</Code>{" "}
+        When the run completes, download the dataset from the <Code>Export results</Code> card — the three buttons
+        stream the file live through your session. Use <Code>JSON</Code> for machine processing, <Code>CSV</Code>{" "}
         for spreadsheets, and <Code>Excel</Code> for a formatted workbook.
       </P>
       <H2>5. Enable browser mode (optional)</H2>
@@ -428,13 +429,15 @@ npm run dev   # http://localhost:3000`}</Pre>
       <H2>Requirements</H2>
       <P>
         Excel export needs <Code>openpyxl</Code>; CSV is stdlib-only. If <Code>openpyxl</Code> is missing the API
-        returns <Code>{"503 { \"A dependency is unavailable\" }"}</Code> for Excel and the dashboard hides that option.
+        returns <Code>{"503 { \"A dependency is unavailable\" }"}</Code> for Excel and the dashboard button reports the
+        error.
       </P>
       <H2>Streaming & limits</H2>
       <P>
         Exports are generated server-side and streamed as attachments. They are not capped at 2,000 rows the way the
         in-browser preview is, so use the export endpoints for large datasets. A running job returns{" "}
-        <Code>409</Code> until it finishes. Filenames look like <Code>facebook_posts.xlsx</Code>.
+        <Code>409</Code> until it finishes. The dashboard downloads are signed with your session and saved as{" "}
+        <Code>facebook_posts.json</Code>, <Code>facebook_posts.csv</Code> or <Code>facebook_posts.xlsx</Code>.
       </P>
       <H2>Pruning results: delete</H2>
       <P>
@@ -562,6 +565,11 @@ GET /api/jobs/{job_id}/export/excel`}</Pre>
           [<Code key="503">503</Code>, "Excel dependency (openpyxl) unavailable"],
         ]}
       />
+      <P>
+        Every export endpoint requires the same Firebase bearer token as the rest of the API. The dashboard&lsquo;s
+        Export card fetches the file with your session and saves it with the canonical filename — a plain browser
+        navigation to the URL without the token returns <Code>401</Code>.
+      </P>
       <H2>Accounts</H2>
       <Pre>{`GET /api/accounts
 → { "items": [ { "name": "default",

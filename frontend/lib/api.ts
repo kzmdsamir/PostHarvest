@@ -22,6 +22,8 @@ import type {
   UserProfile,
 } from "./types";
 
+import { EXPORT_FILENAMES } from "./types";
+
 /** Resolved at build time. Defaults to the local backend. */
 export const API_BASE: string = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/+$/, "");
 
@@ -230,9 +232,72 @@ export const api = {
     });
   },
 
-  /** Absolute URL for the live export endpoints (JSON/CSV/XLSX). */
-  getExportUrl(jobId: string, format: ExportFormat): string {
-    return `${API_BASE}/api/jobs/${encodeURIComponent(jobId)}/export/${format}`;
+  /**
+   * GET /api/jobs/{job_id}/export/{format} — stream a job's results as
+   * JSON/CSV/XLSX. Fetches with the Firebase bearer token (headed requests
+   * only; a plain navigation carries no auth) and triggers a browser download
+   * with the canonical filename. Throws ApiError on failure.
+   */
+  async exportJobDownload(jobId: string, format: ExportFormat): Promise<void> {
+    const url = `${API_BASE}/api/jobs/${encodeURIComponent(jobId)}/export/${format}`;
+    const headers: Record<string, string> = { Accept: "application/json" };
+
+    try {
+      const { auth } = await import("./firebase");
+      if (auth.currentUser) {
+        const token = await auth.currentUser.getIdToken();
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+      }
+    } catch {
+      // firebase chunks unavailable (build/SSR) — the request below will 401.
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(url, { cache: "no-store", headers });
+    } catch {
+      throw new ApiError({
+        code: "network_error",
+        message: `API unreachable at ${API_BASE}. Is the backend running?`,
+      });
+    }
+
+    if (!response.ok) {
+      let code = "http_error";
+      let message = `Export failed with status ${response.status}.`;
+      try {
+        const body = (await response.json()) as Partial<ApiErrorBody> | null;
+        if (body?.error) {
+          code = typeof body.error.code === "string" ? body.error.code : code;
+          message = typeof body.error.message === "string" ? body.error.message : message;
+        }
+      } catch {
+        // Non-JSON error body — keep the generic message.
+      }
+
+      // Stale/expired session → same hard redirect the rest of the API uses.
+      if (
+        response.status === 401 &&
+        typeof window !== "undefined" &&
+        window.location.pathname !== "/login" &&
+        ["auth_required", "invalid_token", "account_disabled", "expired_id_token"].includes(code)
+      ) {
+        window.location.replace("/login");
+      }
+      throw new ApiError({ status: response.status, code, message });
+    }
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = EXPORT_FILENAMES[format];
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
   },
 
   /** GET /api/jobs — paginated history, newest first. */
