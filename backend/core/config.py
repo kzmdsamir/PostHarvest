@@ -70,14 +70,11 @@ class Settings(BaseSettings):
     # Max seconds a server-side personal-cookie Facebook login may take.
     personal_login_timeout_seconds: float = 90.0
     # --- session capture (live browser login) ----------------------------------
-    # The capture browser binds a Chromium remote-debugging (CDP) endpoint
-    # inside the backend container; the port is published on the host and the
-    # user reaches it over the LAN. LAN-only by design — the login page must be
-    # interactable, and CDP must never be exposed through the public tunnel.
+    # The capture browser binds a Chromium remote-debugging (CDP) endpoint on
+    # loopback inside the backend container. Nothing is published to the host:
+    # the API proxies the DevTools frontend and bridges its websocket, so the
+    # whole flow stays on the app's own origin (works from any device).
     session_capture_port: int = 9333
-    # LAN host+port the user's browser opens for the capture page. Defaults to
-    # the server PC's LAN IP; override when the host address differs.
-    session_capture_public_host: str = "192.168.10.41"
     # Max seconds to wait for the user to finish logging in before cleanup.
     session_capture_timeout_seconds: float = 240.0
 

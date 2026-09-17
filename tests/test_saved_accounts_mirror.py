@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
 
+from backend.api import accounts as accounts_api
 from backend.core.config import get_settings
 from backend.core.database import SessionLocal
 from backend.models import SavedAccount, User
@@ -170,16 +172,18 @@ def test_import_cookie_files_to_db_backfills_disk_jars(authed_client):
 
 
 def _stub_capture_worker(record, timeout_seconds):
-    record["url"] = "http://192.168.10.41:9333/devtools/inspector.html?ws=ws-test"
+    record["ready"] = True
 
 
-def test_start_session_capture_returns_pipe_url(monkeypatch):
+def test_start_session_capture_returns_info(monkeypatch):
     monkeypatch.setattr(browser_scraper, "_capture_worker", _stub_capture_worker)
     info = start_session_capture(owner_id=None, account_name="ops-capture", scope="ops", timeout_seconds=60)
-    assert info["url"].startswith("http://")
     assert info["scope"] == "ops"
     assert info["name"] == "ops-capture"
+    assert info["capture_id"]
     assert info["expires_at"]
+    # the raw link is composed by the API endpoint from the request host
+    assert "url" not in info
     browser_scraper._CAPTURES.clear()
 
 
@@ -207,7 +211,6 @@ def test_capture_endpoint_returns_link(authed_client, monkeypatch):
             "capture_id": "cap-1",
             "name": account_name or "default",
             "scope": scope,
-            "url": "http://192.168.10.41:9333/devtools/inspector.html?ws=w",
             "expires_at": "2026-01-01T00:00:00Z",
         }
 
@@ -216,8 +219,13 @@ def test_capture_endpoint_returns_link(authed_client, monkeypatch):
     assert r.status_code == 201
     body = r.json()
     assert body["scope"] == "me"
-    assert body["url"].startswith("http://")
     assert body["capture_id"] == "cap-1"
+    # The link is same-origin (composed from the request host) with the ws
+    # target pointing at the backend bridge — no CDP port anywhere in it.
+    assert body["url"].startswith(
+        "http://testserver/api/accounts/capture/cap-1/devtools/inspector.html"
+        "?ws=ws://testserver/api/accounts/capture/cap-1/cdp"
+    )
 
 
 def test_capture_ops_scope_requires_ops_role(authed_client, monkeypatch):
@@ -275,3 +283,131 @@ def test_capture_conflict_returns_409(authed_client, monkeypatch):
 
 def test_cancel_capture_endpoint_noop_204(authed_client):
     assert authed_client.delete("/api/accounts/capture/does-not-exist").status_code == 204
+
+
+# ---------------------------------------------------------------------------
+# same-origin capture viewer (CDP proxy + websocket bridge)
+# ---------------------------------------------------------------------------
+
+
+def _fake_live_record(capture_id: str) -> dict:
+    return {
+        "id": capture_id,
+        "key": f"me:{capture_id}",
+        "scope": "me",
+        "owner_id": None,
+        "name": "viewer-test",
+        "finished": False,
+        "ready": True,
+        "error": None,
+        "cancel": False,
+        "saved": False,
+        "deadline": 0.0,
+    }
+
+
+def test_capture_viewer_link_uses_request_base(authed_client, monkeypatch):
+    def fake_start(*, owner_id, account_name=None, scope="me", timeout_seconds=None):
+        return {
+            "capture_id": "cap-link-1",
+            "name": account_name or "default",
+            "scope": scope,
+            "expires_at": "2026-01-01T00:00:00Z",
+        }
+
+    monkeypatch.setattr("backend.api.accounts.start_session_capture", fake_start)
+    r = authed_client.post("/api/accounts/capture", json={"name": "x", "scope": "me"})
+    assert r.status_code == 201
+    url = r.json()["url"]
+    assert url.startswith(
+        "http://testserver/api/accounts/capture/cap-link-1/devtools/inspector.html"
+        "?ws=ws://testserver/api/accounts/capture/cap-link-1/cdp"
+    )
+
+
+def test_capture_devtools_proxy_404_when_unknown(client):
+    assert client.get("/api/accounts/capture/unknown-id/devtools/inspector.html").status_code == 404
+    assert client.get("/api/accounts/capture/unknown-id/json/version").status_code == 404
+
+
+def test_capture_devtools_proxy_404_when_finished(client):
+    record = _fake_live_record("cap-finished")
+    record["finished"] = True
+    browser_scraper._CAPTURES["me:finished"] = record
+    try:
+        assert client.get("/api/accounts/capture/cap-finished/devtools/inspector.html").status_code == 404
+    finally:
+        browser_scraper._CAPTURES.clear()
+
+
+def test_capture_devtools_proxy_streams_asset(client, monkeypatch):
+    from fastapi.responses import StreamingResponse
+
+    async def _fake_stream(url):  # noqa: ANN001 - monkeypatched stand-in
+        async def body():
+            yield b"<html>fake devtools asset</html>"
+
+        return StreamingResponse(body(), media_type="text/html")
+
+    browser_scraper._CAPTURES["me:stream"] = _fake_live_record("cap-stream")
+    monkeypatch.setattr(accounts_api, "_stream_upstream", _fake_stream)
+    try:
+        r = client.get("/api/accounts/capture/cap-stream/devtools/front_end/inspector.js")
+        assert r.status_code == 200
+        assert "fake devtools asset" in r.text
+    finally:
+        browser_scraper._CAPTURES.clear()
+
+
+def test_capture_ws_bridge_forwards_frames(client, monkeypatch):
+    import asyncio
+
+    record = _fake_live_record("cap-ws")
+    browser_scraper._CAPTURES["me:ws"] = record
+
+    class _FakeCDP:
+        def __init__(self) -> None:
+            self.received: list = []
+
+        async def send(self, message) -> None:  # noqa: ANN001
+            self.received.append(message)
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self) -> None:
+            await asyncio.sleep(3600)  # stay open until cancelled
+
+    class _FakeConnect:
+        def __init__(self, cdp) -> None:  # noqa: ANN001
+            self._cdp = cdp
+
+        async def __aenter__(self):
+            return self._cdp
+
+        async def __aexit__(self, *exc) -> None:
+            return None
+
+    fake = _FakeCDP()
+    monkeypatch.setattr(accounts_api, "_capture_ws_url", lambda base: "ws://fake")
+    monkeypatch.setattr(accounts_api, "_cdp_connect", lambda *a, **k: _FakeConnect(fake))
+    try:
+        with client.websocket_connect("/api/accounts/capture/cap-ws/cdp") as ws:
+            ws.send_text("hello")
+            ws.send_text("world")
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline and fake.received != ["hello", "world"]:
+                time.sleep(0.02)
+            assert fake.received == ["hello", "world"]
+    finally:
+        browser_scraper._CAPTURES.clear()
+
+
+def test_capture_ws_denied_when_unknown(client):
+    refused = False
+    try:
+        with client.websocket_connect("/api/accounts/capture/unknown-id/cdp") as ws:
+            ws.receive_text()
+    except Exception:  # noqa: BLE001 - refusal can occur at connect or on receive
+        refused = True
+    assert refused, "expected the capture websocket to be refused"

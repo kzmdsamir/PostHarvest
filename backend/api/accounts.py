@@ -14,20 +14,36 @@ Endpoints
 ---------
 * GET    /api/accounts                      — ``{ops: [...], mine: [...]}`` (authed)
 * POST   /api/accounts/capture              — start a live session capture; returns a
-                                              pipe link the user opens to log into
-                                              Facebook in a new tab (authed; ``ops``
-                                              scope requires the ops role)
+                                              same-origin viewer link the user opens to
+                                              log into Facebook in a new tab (authed;
+                                              ``ops`` scope requires the ops role)
 * DELETE /api/accounts/capture/{id}         — abort a running capture (authed)
 * POST   /api/accounts/personal             — label + FB credentials → server-side
                                               login, save a personal session (authed)
 * DELETE /api/accounts/{scope}/{name}       — remove a session (scope + role gated)
+
+Capture viewer (capability-based, same-origin):
+* GET /api/accounts/capture/{id}/devtools/{path} — proxy the capture browser's
+                                                   DevTools frontend assets
+* GET /api/accounts/capture/{id}/json/{path}     — proxy Chrome CDP /json endpoints
+* WS  /api/accounts/capture/{id}/cdp             — bridge the capture browser's CDP
+                                                   websocket (single client)
+The unguessable ``capture_id`` is the credential; CDP itself stays on
+loopback inside the backend container and is never published.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response, status
+import asyncio
+
+import httpx
+import websockets
+from fastapi import APIRouter, Depends, Request, Response, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from websockets.asyncio.client import ClientConnection, connect as _cdp_connect
 
 from backend.auth.dependencies import get_current_user
+from backend.core.config import get_settings
 from backend.core.database import get_db
 from backend.core.exceptions import AppError, NotFoundError
 from backend.core.plans import personal_account_cap
@@ -42,9 +58,11 @@ from backend.schemas.accounts import (
 from backend.scraper.browser_scraper import (
     CaptureAlreadyActive,
     CaptureStartFailed,
+    _capture_ws_url,
     account_metadata,
     cancel_session_capture,
     delete_account,
+    get_capture_record,
     get_cookie_status,
     list_accounts,
     login_with_credentials,
@@ -52,6 +70,119 @@ from backend.scraper.browser_scraper import (
 )
 
 router = APIRouter(tags=["accounts"])
+
+
+# ---------------------------------------------------------------------------
+# Same-origin session-capture viewer (CDP proxy + websocket bridge)
+# ---------------------------------------------------------------------------
+
+
+def _cdp_base() -> str:
+    """Loopback base of the running capture Chromium's CDP endpoint."""
+    return f"http://127.0.0.1:{get_settings().session_capture_port}"
+
+
+def _capture_live(capture_id: str) -> bool:
+    """True while a capture with this id exists and is still running."""
+    record = get_capture_record(capture_id)
+    return bool(record and not record.get("finished"))
+
+
+def _build_capture_link(request: Request, capture_id: str) -> str:
+    """Compose the same-origin DevTools viewer link for a live capture.
+
+    The DevTools frontend is served by the backend (CDP proxy) and its ``ws=``
+    target is the backend's bridge, so the whole flow stays on the app's own
+    origin and scheme (``https``/``wss`` behind TLS, ``http``/``ws`` in dev) —
+    no CDP port is ever exposed. The unguessable ``capture_id`` gates access.
+    """
+    base = str(request.base_url).rstrip("/")
+    scheme = "wss" if request.base_url.scheme == "https" else "ws"
+    netloc = request.base_url.netloc
+    ws_url = f"{scheme}://{netloc}/api/accounts/capture/{capture_id}/cdp"
+    return (
+        f"{base}/api/accounts/capture/{capture_id}/devtools/inspector.html"
+        f"?ws={ws_url}"
+    )
+
+
+_PROXY_STRIP_HEADERS = frozenset(
+    {"content-encoding", "content-length", "transfer-encoding", "connection", "keep-alive"}
+)
+
+
+async def _stream_upstream(url: str) -> StreamingResponse:
+    """Stream an upstream GET response (Chrome's CDP HTTP endpoints)."""
+
+    async def _close() -> None:
+        await response.aclose()
+        await client.aclose()
+
+    client = httpx.AsyncClient()
+    try:
+        request = client.build_request("GET", url, headers={"Accept-Encoding": "identity"})
+        response = await client.send(request, stream=True)
+    except httpx.HTTPError:
+        await client.aclose()
+        raise
+    headers = {
+        key: value
+        for key, value in response.headers.items()
+        if key.lower() not in _PROXY_STRIP_HEADERS and key.lower() != "content-type"
+    }
+    return StreamingResponse(
+        response.aiter_bytes(),
+        status_code=response.status_code,
+        headers=headers,
+        media_type=response.headers.get("content-type"),
+        background=_close,
+    )
+
+
+async def _try_bridge_lock(record: dict) -> bool:
+    """Grab the capture's single-bridge lock without waiting.
+
+    ``asyncio.wait_for(lock.acquire(), timeout=0)`` races on a freshly
+    created lock, so check-then-acquire is used instead (``acquire``'s fast
+    path never suspends, keeping the check+acquire atomic per loop turn).
+    """
+    lock = record.setdefault("_bridge_lock", asyncio.Lock())
+    if lock.locked():
+        return False
+    await lock.acquire()
+    return True
+
+
+async def _pump_ws_bridge(websocket: WebSocket, cdp: ClientConnection) -> None:
+    """Forward websocket frames both ways between viewer and CDP endpoint."""
+
+    async def cdp_to_client() -> None:
+        async for message in cdp:
+            if isinstance(message, str):
+                await websocket.send_text(message)
+            else:
+                await websocket.send_bytes(message)
+
+    async def client_to_cdp() -> None:
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.disconnect":
+                return
+            text = message.get("text")
+            if text is not None:
+                await cdp.send(text)
+                continue
+            data = message.get("bytes")
+            if data is not None:
+                await cdp.send(data)
+
+    tasks = (asyncio.create_task(cdp_to_client()), asyncio.create_task(client_to_cdp()))
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def _normalize_scope(scope: str) -> str:
@@ -160,13 +291,14 @@ def add_personal_account(
 )
 def start_capture(
     payload: SessionCaptureRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> SessionCaptureOut:
-    """Launch a throwaway Chromium with a remote-debugging endpoint and return
-    a pipe link the caller opens in a new tab. The user signs in to Facebook
-    there (solving any CAPTCHA live); the backend captures the ``c_user`` +
-    ``xs`` session cookies and saves the jar automatically.
+    """Launch a throwaway Chromium whose DevTools viewer is proxied same-origin
+    and return the link the caller opens in a new tab. The user signs in to
+    Facebook there (solving any CAPTCHA live); the backend captures the
+    ``c_user`` + ``xs`` session cookies and saves the jar automatically.
 
     Scope rules match the rest of the accounts API: ``me`` is open to any
     signed-in user (plan-capped, one capture at a time); ``ops`` requires the
@@ -213,6 +345,7 @@ def start_capture(
             status_code=502,
             code="capture_start_failed",
         )
+    info["url"] = _build_capture_link(request, info["capture_id"])
     return SessionCaptureOut(**info)
 
 
@@ -230,6 +363,68 @@ def cancel_capture(
     and cleans up. Unknown or already-finished captures are a no-op 204."""
     cancel_session_capture(capture_id)
     return Response(status_code=204)
+
+
+@router.websocket("/accounts/capture/{capture_id}/cdp")
+async def capture_cdp_bridge(websocket: WebSocket, capture_id: str) -> None:
+    """Bridge the server-side capture browser's CDP websocket to the viewer.
+
+    Capability-based: the unguessable ``capture_id`` in the URL is the
+    credential. The socket is refused (never accepted) when the capture is
+    unknown/finished, or when another client is already attached.
+    """
+    record = get_capture_record(capture_id)
+    if not record or record.get("finished"):
+        await websocket.close(code=4404)
+        return
+    target = _capture_ws_url(_cdp_base())
+    if not target:
+        await websocket.close(code=4404)
+        return
+    if not await _try_bridge_lock(record):
+        await websocket.close(code=4403)
+        return
+    await websocket.accept()
+    try:
+        async with _cdp_connect(target, max_size=64 * 1024 * 1024) as cdp:
+            await _pump_ws_bridge(websocket, cdp)
+    except (WebSocketDisconnect, websockets.ConnectionClosed):
+        pass
+    except Exception:  # noqa: BLE001 - bridge teardown is best-effort
+        pass
+    finally:
+        lock = record.get("_bridge_lock")
+        if lock is not None and lock.locked():
+            lock.release()
+
+
+@router.get(
+    "/accounts/capture/{capture_id}/devtools/{path:path}",
+    response_class=StreamingResponse,
+    summary="Proxy the capture browser's DevTools frontend assets",
+)
+async def capture_devtools_proxy(capture_id: str, path: str) -> StreamingResponse:
+    """Stream the DevTools frontend served by the live capture Chromium.
+
+    Only reachable for an active capture; the unguessable ``capture_id`` is
+    the capability. The frontend itself holds no session data — the websocket
+    bridge is where the actual page lives.
+    """
+    if not _capture_live(capture_id):
+        raise NotFoundError("Capture is not active or does not exist")
+    return await _stream_upstream(f"{_cdp_base()}/devtools/{path}")
+
+
+@router.get(
+    "/accounts/capture/{capture_id}/json/{path:path}",
+    response_class=StreamingResponse,
+    include_in_schema=False,
+    summary="Proxy Chrome's CDP /json endpoints for the DevTools frontend",
+)
+async def capture_json_proxy(capture_id: str, path: str) -> StreamingResponse:
+    if not _capture_live(capture_id):
+        raise NotFoundError("Capture is not active or does not exist")
+    return await _stream_upstream(f"{_cdp_base()}/json/{path}")
 
 
 @router.delete(

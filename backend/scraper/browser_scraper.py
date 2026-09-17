@@ -759,9 +759,10 @@ def login_with_credentials(
 # in / solves the CAPTCHA live; this module polls for the ``c_user`` + ``xs``
 # session cookies, saves the jar (disk + mirror), then tears the browser down.
 #
-# LAN-only by design: CDP is never exposed through the public tunnel, the
-# profile is ephemeral, and the browser is killed on success, cancel or
-# timeout.
+# CDP is bound to loopback inside the container and never published. The API
+# exposes a same-origin, capture_id-gated proxy (/api/accounts/capture/{id}/...)
+# so the flow works from any device without ever opening a port. The profile is
+# ephemeral and the browser is killed on success, cancel or timeout.
 # ---------------------------------------------------------------------------
 
 # Locked decision 2026-09-17: one published host port (SESSION_CAPTURE_PORT)
@@ -797,13 +798,13 @@ def start_session_capture(
     scope: str = "me",
     timeout_seconds: float | None = None,
 ) -> dict:
-    """Launch a live session-capture browser and return its pipe URL.
+    """Launch a live session-capture browser and wait for it to come up.
 
     Launches the worker in a daemon thread and blocks (bounded) until the
-    browser is up and the URL is published (or the start fails).
+    browser is up (or the start fails). The API endpoint composes the
+    same-origin DevTools viewer link from the request host afterwards.
 
-    Returns a dict with ``capture_id``, ``name``, ``scope``, ``url`` (the
-    DevTools inspector link to open in a new tab) and ``expires_at``.
+    Returns a dict with ``capture_id``, ``name``, ``scope`` and ``expires_at``.
     Raises :class:`CaptureAlreadyActive` when a capture in the same scope is
     already running, or :class:`CaptureStartFailed` on startup failure.
     """
@@ -839,16 +840,15 @@ def start_session_capture(
         daemon=True,
     ).start()
 
-    # Wait (bounded) for the worker to publish the pipe URL.
+    # Wait (bounded) for the worker to signal the capture browser is ready.
     wait_deadline = time.monotonic() + 20
     while time.monotonic() < wait_deadline:
         with _CAPTURES_LOCK:
-            if record.get("url"):
+            if record.get("ready"):
                 return {
                     "capture_id": capture_id,
                     "name": record["name"],
                     "scope": scope,
-                    "url": record["url"],
                     "expires_at": (
                         datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
                     ).isoformat(),
@@ -874,6 +874,18 @@ def cancel_session_capture(capture_id: str) -> bool:
                 record["cancel"] = True
                 return True
     return False
+
+
+def get_capture_record(capture_id: str) -> dict | None:
+    """Return the capture record with ``capture_id``, or None.
+
+    Used by the API's CDP proxy/bridge to gate access to an active capture.
+    """
+    with _CAPTURES_LOCK:
+        for record in _CAPTURES.values():
+            if record["id"] == capture_id:
+                return record
+    return None
 
 
 def _wait_for_cdp(base: str, deadline: float) -> bool:
@@ -929,7 +941,7 @@ def _capture_worker(record: dict, timeout_seconds: float) -> None:
                 [
                     executable,
                     f"--remote-debugging-port={port}",
-                    "--remote-debugging-address=0.0.0.0",
+                    "--remote-debugging-address=127.0.0.1",
                     f"--user-data-dir={profile}",
                     "--no-sandbox",
                     "--headless=new",
@@ -975,11 +987,11 @@ def _capture_worker(record: dict, timeout_seconds: float) -> None:
             ws_url = _capture_ws_url(cdp_base)
             if not ws_url:
                 raise CaptureStartFailed("could not resolve the capture page WebSocket")
-            public_host = settings.session_capture_public_host or "192.168.10.41"
-            _record_set(
-                record,
-                url=f"http://{public_host}:{port}/devtools/inspector.html?ws={ws_url}",
-            )
+            # Browser is up and reachable through the CDP proxy — publish
+            # readiness. The API endpoint composes the same-origin viewer link
+            # from the request host, so it works from any device without
+            # exposing the CDP port.
+            _record_set(record, ready=True)
 
             # Poll for the two cookies that define a Facebook session (c_user +
             # xs), giving the user time to log in and solve the CAPTCHA.
