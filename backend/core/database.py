@@ -89,10 +89,14 @@ def _sqlite_pragmas(dbapi_connection, _connection_record) -> None:  # noqa: ANN0
 def init_db() -> None:
     """Create all tables if they do not exist.
 
-    Alembic migrations are optional for this project; create_all is the
-    documented simple path. Importing ``backend.models`` registers every model
-    on ``Base.metadata``. ``_migrate_additive_columns`` then folds in columns
-    that were added after a table first shipped (idempotent; safe to rerun).
+    Alembic owns the schema on deployed environments: the prod backend entry
+    point runs ``alembic upgrade head`` before uvicorn boots
+    (docker-compose.prod.yml).  ``create_all`` remains here as the idempotent
+    dev/test convenience (it never alters existing tables — new columns on a
+    worked database MUST ship as regular Alembic migrations, not schema
+    additions here).  Importing ``backend.models`` registers every model on
+    ``Base.metadata``.  ``_migrate_additive_columns`` is the legacy shim that
+    reconciled pre-Alembic dev databases; new columns go through Alembic.
     """
     from backend import models  # noqa: F401  (side effect: register models)
 

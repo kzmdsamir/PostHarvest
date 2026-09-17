@@ -106,6 +106,21 @@ Key compose-level vars (all have defaults baked into the compose files):
 | `NEXT_PUBLIC_SITE_URL` | https://postharvest.space | canonical origin for sitemap/robots/OG |
 | `BACKEND_MEM_LIMIT` etc. | 1g/1.5 … | prod-only resource caps |
 
+## Database migrations
+
+Alembic owns the deployed schema:
+
+- The prod backend boots with `alembic upgrade head` before uvicorn
+  (docker-compose.prod.yml) — every deploy applies pending migrations
+  idempotently.
+- A database that already has tables (created by the old `create_all` path —
+  e.g. the current Supabase database) must be stamped **once** before the
+  first upgrade-head boot, otherwise the initial migration fails with
+  "relation already exists":
+  `alembic -c backend/alembic.ini stamp head` (with `SUPABASE_DB_URL` set).
+- Schema changes ship as new Alembic revisions only. `create_all` is kept
+  solely as the dev/test convenience and never alters existing tables.
+
 ## Sharing cookies between CLI and container
 
 The backend bind-mounts `../data` (repo `data/`), so `python cli.py login
@@ -120,7 +135,7 @@ The path to public deployment (tracked in ROADMAP phases 3–5 and
 DECISIONS.md O1/O4):
 
 1. Install Docker + add your user to the `docker` group on the VPS.
-2. Clone `https://github.com/kzmdsamir/postharvest.git`, write `docker/.env`
+2. Clone `https://github.com/teampostharvest/PostHarvest.git`, write `docker/.env`
    with real secrets.
 3. Point `postharvest.space` DNS (A record) at the VPS public IP.
 4. Wire Let's Encrypt at nginx (certbot on the host; scripts planned under
