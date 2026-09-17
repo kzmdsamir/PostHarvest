@@ -325,13 +325,15 @@ npm run dev   # http://localhost:3000`}</Pre>
       <Pre>{`python cli.py login --account default`}</Pre>
       <P>
         Your own personal sessions are added in the dashboard instead: <Code>Saved sessions → Add my session</Code>.
-        That signs you into Facebook once in a headless browser; only the session cookies are stored with your account
-        (encrypted at rest, never the password), and your plan caps how many you can keep.
+        That starts a one-time login browser and hands you a link — you open it in a new tab and sign in to Facebook
+        there (solving any CAPTCHA yourself). The app only captures the resulting session cookie: the password is never
+        stored, and your plan caps how many sessions you can keep. Operators can also add sessions shared by everyone
+        with <Code>Add shared session</Code> (hidden for regular users).
       </P>
       <P>
-        Cookies are stored under <Code>data/</Code> for the operator pool, or{" "}
-        <Code>data/personal/&#123;user&#125;/</Code> for personal sessions, and never uploaded anywhere. A credentials
-        index keeps only metadata.
+        Cookie files remain on disk under <Code>data/</Code> for the operator pool, or{" "}
+        <Code>data/personal/&#123;user&#125;/</Code> for personal sessions; an encrypted mirror row is kept in the
+        database as well, so a restored host still lists its sessions. A credentials index keeps only metadata.
       </P>
       <H2>Using sessions</H2>
       <ul className="list-disc space-y-1 pl-5">
@@ -351,8 +353,10 @@ npm run dev   # http://localhost:3000`}</Pre>
       <H2>API</H2>
       <P>
         <Code>GET /api/accounts</Code> returns session metadata split into the shared <Code>ops</Code> pool and your
-        <Code>me</Code> sessions; <Code>DELETE /api/accounts/&#123;scope&#125;/&#123;name&#125;</Code> removes one. Cookie
-        contents are never exposed over the API.
+        <Code>me</Code> sessions; <Code>DELETE /api/accounts/&#123;scope&#125;/&#123;name&#125;</Code> removes one.
+        <Code>POST /api/accounts/capture</Code> starts the live login flow and returns the tab link ({" "}
+        <Code>ops</Code> scope requires the ops role); <Code>DELETE /api/accounts/capture/&#123;id&#125;</Code> aborts
+        it. Cookie contents are never exposed over the API.
       </P>
     </>
   ),

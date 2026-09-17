@@ -8,6 +8,7 @@
 import type {
   AccountSession,
   AccountsResponse,
+  SessionCaptureOut,
   AdminUser,
   ApiErrorBody,
   ExportFormat,
@@ -319,6 +320,21 @@ export const api = {
     return request<AccountSession>("/api/accounts/personal", {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+  },
+
+  /** POST /api/accounts/capture — start a live session capture (returns a pipe link to open). */
+  async startSessionCapture(payload: { name: string; scope: "ops" | "me" }): Promise<SessionCaptureOut> {
+    return request<SessionCaptureOut>("/api/accounts/capture", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /** DELETE /api/accounts/capture/{capture_id} — abort a running capture (best-effort). */
+  async cancelSessionCapture(captureId: string): Promise<void> {
+    return request<void>(`/api/accounts/capture/${encodeURIComponent(captureId)}`, {
+      method: "DELETE",
     });
   },
 

@@ -11,6 +11,7 @@ from backend.models.export_jobs import ExportJob
 from backend.models.media import Media
 from backend.models.posts import Post
 from backend.models.scrape_jobs import ScrapeJob
+from backend.models.saved_account import SavedAccount
 from backend.models.sources import ScrapeSource
 
 from backend.models.user import User
@@ -25,4 +26,5 @@ __all__ = [
     "Media",
     "ExportJob",
     "ScrapeError",
+    "SavedAccount",
 ]

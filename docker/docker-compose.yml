@@ -74,6 +74,11 @@ services:
     image: postharvest-backend:latest
     container_name: postharvest-backend
     init: true
+    # Live session-capture browser (remote-debug CDP). One fixed published port
+    # = one capture at a time app-wide; the user reaches it over the LAN only
+    # (never through the public tunnel).
+    ports:
+      - "${SESSION_CAPTURE_PORT:-9333}:${SESSION_CAPTURE_PORT:-9333}"
     environment:
       DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/postharvest.db}
       SUPABASE_DB_URL: ${SUPABASE_DB_URL:-}
@@ -99,6 +104,10 @@ services:
       OPS_EMAILS: ${OPS_EMAILS:-}
       # Max seconds a server-side personal Facebook login may run.
       PERSONAL_LOGIN_TIMEOUT_SECONDS: ${PERSONAL_LOGIN_TIMEOUT_SECONDS:-90.0}
+      # Live session capture (remote-debug browser login; LAN-only).
+      SESSION_CAPTURE_PORT: ${SESSION_CAPTURE_PORT:-9333}
+      SESSION_CAPTURE_PUBLIC_HOST: ${SESSION_CAPTURE_PUBLIC_HOST:-192.168.10.41}
+      SESSION_CAPTURE_TIMEOUT_SECONDS: ${SESSION_CAPTURE_TIMEOUT_SECONDS:-240.0}
     volumes:
       # Bind-mount the repo data/ dir so the CLI (host) and the container share
       # the same cookie store / exports. Keep the file layout identical to

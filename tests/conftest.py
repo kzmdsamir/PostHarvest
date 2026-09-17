@@ -76,6 +76,7 @@ init_db()
 _CLEANUP_MODELS = (
     "ExportJob",
     "ScrapeError",
+    "SavedAccount",
     "CrawlState",
     "Media",
     "EngagementMetric",

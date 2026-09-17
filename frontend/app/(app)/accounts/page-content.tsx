@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, Loader2, Plus, RefreshCw, Trash2, Users } from "lucide-react";
+import { ExternalLink, KeyRound, Loader2, Plus, RefreshCw, Trash2, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import type { AccountSession, PersonalLoginRequest } from "@/lib/types";
+import type { AccountSession, SessionCaptureOut } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,10 +37,15 @@ export default function AccountsPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
+  // Live session-capture flow (replaces the old email/password form — Facebook
+  // shows a CAPTCHA on fresh logins, so the user signs in in a new tab instead).
   const [addOpen, setAddOpen] = useState(false);
+  const [addScope, setAddScope] = useState<"me" | "ops">("me");
+  const [addName, setAddName] = useState("");
+  const [capture, setCapture] = useState<SessionCaptureOut | null>(null);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
-  const [form, setForm] = useState<PersonalLoginRequest>({ name: "", email: "", password: "" });
+  const [waiting, setWaiting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,26 +81,73 @@ export default function AccountsPage() {
     [load],
   );
 
+  const openAdd = (scope: "me" | "ops") => {
+    setAddScope(scope);
+    setAddName("");
+    setCapture(null);
+    setAdding(false);
+    setAddError(null);
+    setWaiting(false);
+    setAddOpen(true);
+  };
+
   const closeAdd = () => {
     setAddOpen(false);
     setAddError(null);
-    setForm({ name: "", email: "", password: "" });
+    setCapture(null);
+    setWaiting(false);
   };
 
-  const handleAdd = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const handleStartCapture = async () => {
     setAddError(null);
     setAdding(true);
     try {
-      await api.addPersonalAccount({ ...form, name: form.name.trim() });
-      closeAdd();
-      await load();
+      const info = await api.startSessionCapture({ name: addName.trim(), scope: addScope });
+      setCapture(info);
+      setWaiting(true);
     } catch (e) {
-      setAddError(e instanceof Error ? e.message : "Could not add session");
+      setAddError(e instanceof Error ? e.message : "Could not start session capture");
     } finally {
       setAdding(false);
     }
   };
+
+  const openLoginTab = () => {
+    if (!capture) return;
+    window.open(capture.url, "_blank", "noopener,noreferrer");
+  };
+
+  const handleCancelCapture = async () => {
+    if (capture) {
+      try {
+        await api.cancelSessionCapture(capture.capture_id);
+      } catch {
+        // best-effort — the capture also expires server-side
+      }
+    }
+    closeAdd();
+  };
+
+  // While a capture is waiting, poll the account list so the new session
+  // appears as soon as the backend saves it.
+  useEffect(() => {
+    if (!waiting || !capture) return;
+    const timer = setInterval(() => {
+      void load();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [waiting, capture, load]);
+
+  // When the captured account lands in the list, the flow is complete.
+  useEffect(() => {
+    if (!waiting || !capture) return;
+    const delivered = (addScope === "ops" ? ops : mine).some((a) => a.name === capture.name);
+    if (delivered) {
+      setCapture(null);
+      setWaiting(false);
+      setAddOpen(false);
+    }
+  }, [waiting, capture, mine, ops, addScope]);
 
   const total = ops.length + mine.length;
 
@@ -149,10 +201,18 @@ export default function AccountsPage() {
               are never exposed.
             </CardDescription>
           </div>
-          <Button type="button" onClick={() => setAddOpen(true)} disabled={adding}>
-            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-            Add my session
-          </Button>
+          <div className="flex items-center gap-2">
+            {isOps ? (
+              <Button type="button" variant="outline" onClick={() => openAdd("ops")}>
+                <Users className="h-3.5 w-3.5" aria-hidden="true" />
+                Add shared session
+              </Button>
+            ) : null}
+            <Button type="button" onClick={() => openAdd("me")}>
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              Add my session
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {error ? (
@@ -179,7 +239,8 @@ export default function AccountsPage() {
             </div>
             {ops.length === 0 ? (
               <p className="py-6 text-center text-xs text-muted-foreground">
-                No operator-managed sessions. Operators add them with{" "}
+                No operator-managed sessions yet. Operators can add one with{" "}
+                <code className="rounded-sm bg-muted px-1.5 py-0.5">Add shared session</code> or the CLI:{" "}
                 <code className="rounded-sm bg-muted px-1.5 py-0.5">cli.py login --account NAME</code>.
               </p>
             ) : (
@@ -208,70 +269,80 @@ export default function AccountsPage() {
 
       <Dialog
         open={addOpen}
-        onClose={() => void closeAdd()}
-        title="Add my Facebook session"
-        description="You'll sign in to Facebook once; only the resulting session cookies are stored with your account (never the password)."
+        onClose={() => void (waiting ? handleCancelCapture() : closeAdd())}
+        title={addScope === "ops" ? "Add shared Facebook session" : "Add my Facebook session"}
+        description={
+          capture
+            ? "A one-time login browser is ready. Open it, sign in to Facebook, and this window closes itself once the session is saved."
+            : "You'll sign in to Facebook in a new tab (solving any CAPTCHA there) — only the resulting session cookies are stored with your account, never the password."
+        }
       >
-        <form onSubmit={(e) => void handleAdd(e)} className="space-y-4">
-          <DialogSection>
-            <div className="space-y-1.5">
-              <label htmlFor="add-name" className="text-sm font-medium">
-                Session name
-              </label>
-              <Input
-                id="add-name"
-                value={form.name}
-                onChange={(event) => setForm({ ...form, name: event.target.value })}
-                placeholder="e.g. personal-a"
-                required
-                autoFocus
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="add-email" className="text-sm font-medium">
-                Facebook email
-              </label>
-              <Input
-                id="add-email"
-                type="email"
-                autoComplete="email"
-                value={form.email}
-                onChange={(event) => setForm({ ...form, email: event.target.value })}
-                placeholder="you@example.com"
-                required
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="add-password" className="text-sm font-medium">
-                Facebook password
-              </label>
-              <Input
-                id="add-password"
-                type="password"
-                autoComplete="off"
-                value={form.password}
-                onChange={(event) => setForm({ ...form, password: event.target.value })}
-                placeholder="••••••••"
-                required
-              />
+        {!capture ? (
+          <div className="space-y-4">
+            <DialogSection>
+              <div className="space-y-1.5">
+                <label htmlFor="add-name" className="text-sm font-medium">
+                  Session name
+                </label>
+                <Input
+                  id="add-name"
+                  value={addName}
+                  onChange={(event) => setAddName(event.target.value)}
+                  placeholder={addScope === "ops" ? "e.g. shared-prod" : "e.g. personal-a"}
+                  required
+                  autoFocus
+                />
+              </div>
               <p className="text-xs text-muted-foreground">
-                Sent once to Facebook in a headless login; discarded immediately after.
+                Opens Facebook&lsquo;s login page in a live browser on your LAN. You complete the sign-in — this app
+                only captures the session cookie.
               </p>
-            </div>
-            {addError ? (
-              <p className="rounded-sm border border-red-700/40 bg-red-700/10 px-3 py-2 text-xs text-red-700">{addError}</p>
-            ) : null}
-            <div className="flex justify-end gap-2 pt-1">
-              <Button type="button" variant="outline" onClick={() => void closeAdd()}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={adding}>
-                {adding ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <KeyRound className="h-4 w-4" aria-hidden="true" />}
-                Sign in to Facebook
-              </Button>
-            </div>
-          </DialogSection>
-        </form>
+              {addError ? (
+                <p className="rounded-sm border border-red-700/40 bg-red-700/10 px-3 py-2 text-xs text-red-700">
+                  {addError}
+                </p>
+              ) : null}
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="outline" onClick={() => void closeAdd()}>
+                  Cancel
+                </Button>
+                <Button type="button" onClick={() => void handleStartCapture()} disabled={adding || !addName.trim()}>
+                  {adding ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+                  {adding ? "Starting browser…" : "Open Facebook login"}
+                </Button>
+              </div>
+            </DialogSection>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <DialogSection>
+              <div className="rounded-sm border border-border bg-muted/30 px-3 py-2.5">
+                <p className="flex items-center gap-2 text-sm font-medium">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  Waiting for you to sign in…
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  The session arrives automatically once you finish logging in (up to ~4 minutes). Keep this window
+                  open.
+                </p>
+              </div>
+              {addError ? (
+                <p className="rounded-sm border border-red-700/40 bg-red-700/10 px-3 py-2 text-xs text-red-700">
+                  {addError}
+                </p>
+              ) : null}
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="outline" onClick={() => void handleCancelCapture()}>
+                  Cancel capture
+                </Button>
+                <Button type="button" onClick={openLoginTab}>
+                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                  Open login tab
+                </Button>
+              </div>
+            </DialogSection>
+          </div>
+        )}
       </Dialog>
     </div>
   );

@@ -158,6 +158,15 @@ export interface PersonalLoginRequest {
   password: string;
 }
 
+/** Response from POST /api/accounts/capture — the pipe link to open. */
+export interface SessionCaptureOut {
+  capture_id: string;
+  name: string;
+  scope: "ops" | "me";
+  url: string;
+  expires_at: string;
+}
+
 /** One row in GET /api/admin/users (ops role only). */
 export interface AdminUser {
   id: number;

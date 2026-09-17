@@ -20,6 +20,7 @@ per progress ping) so a long-scraping source never holds a transaction open.
 """
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from backend.core.config import get_settings
+
+logger = logging.getLogger("db")
 
 
 class Base(DeclarativeBase):
@@ -95,6 +98,16 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _migrate_additive_columns()
+
+    # 2026-09-17: one-time mirror import — seed the saved_accounts table from
+    # existing on-disk cookie jars (no-op once it has rows). Best-effort: a
+    # failure must never block boot.
+    try:
+        from backend.scraper.browser_scraper import import_cookie_files_to_db
+
+        import_cookie_files_to_db()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("saved_accounts import at boot failed: %s", exc)
 
 
 def _migrate_additive_columns() -> None:

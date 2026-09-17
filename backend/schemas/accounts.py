@@ -29,3 +29,23 @@ class PersonalLoginRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=64, description="Account label")
     email: str = Field(..., min_length=3, max_length=320, description="Facebook email")
     password: str = Field(..., min_length=1, description="Facebook password (never stored)")
+
+
+class SessionCaptureRequest(BaseModel):
+    """Start a live session capture (user logs into Facebook in a new tab)."""
+
+    name: str = Field(..., min_length=1, max_length=64, description="Account label")
+    scope: Literal["ops", "me"] = Field(
+        "me",
+        description="me = personal session; ops = shared operator pool (ops role only)",
+    )
+
+
+class SessionCaptureOut(BaseModel):
+    """Response with the pipe link the user opens to log into Facebook."""
+
+    capture_id: str
+    name: str
+    scope: Literal["ops", "me"]
+    url: str
+    expires_at: str
