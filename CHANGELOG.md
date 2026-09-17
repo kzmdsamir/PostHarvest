@@ -1,0 +1,58 @@
+## [1.0.1](https://github.com/teampostharvest/postharvest/compare/v1.0.0...v1.0.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **scripts:** continue ladder past a non-master hop ([91db989](https://github.com/teampostharvest/postharvest/commit/91db98947f0defc011a3562d6ffebba4ff7b2301))
+
+# 1.0.0 (2026-09-17)
+
+
+### Bug Fixes
+
+* **auth:** configure Firebase Web SDK frontend build args and fallback defaults ([47357c6](https://github.com/teampostharvest/postharvest/commit/47357c62fc804abb91514547019351ab1f46aafa))
+* **cli:** prefer .venv/bin/python over system python in Makefile ([23d80eb](https://github.com/teampostharvest/postharvest/commit/23d80ebdca592ee8698fc0993aefacffcb8c9771))
+* **dedup:** truncate timestamp to seconds in content fingerprint ([f361d9b](https://github.com/teampostharvest/postharvest/commit/f361d9bb575f1ef19b7568f1be4e2c4f3ee420f3))
+* enforce ops role idempotently on every login ([23247e1](https://github.com/teampostharvest/postharvest/commit/23247e180921c275d5f02d4ef2b74c1bed61090d))
+* export downloads were unauthenticated navigations ([e915eb4](https://github.com/teampostharvest/postharvest/commit/e915eb4629eb9bf7c55df337cdea100bbb29c454))
+* fixed the unicode problem thing in normalizer.py ([ca27ea1](https://github.com/teampostharvest/postharvest/commit/ca27ea1c87f9a47e0d4903f7c40b413dcde1cc7b))
+* keep capture Chromium alive in the hardened container ([caf4f64](https://github.com/teampostharvest/postharvest/commit/caf4f64d000ff97cbb3dbdfdfd60cf02410cc1b7))
+* keep the capture dialog centered regardless of page context ([b6a4e2b](https://github.com/teampostharvest/postharvest/commit/b6a4e2b7bd073442336980f17e80930feb1f933c))
+* **parser:** tighten date/time parsing and share-count extraction ([7e45405](https://github.com/teampostharvest/postharvest/commit/7e45405dfd0ec3f7aa52f2b7128a173c7f3fd950))
+* **progress:** show live posts-based percentage while scraping ([1954ea7](https://github.com/teampostharvest/postharvest/commit/1954ea7139ce5012c7607b480d879f58cf5cba38))
+* repair test database setup ([6482baf](https://github.com/teampostharvest/postharvest/commit/6482baf8178908ca0ca4f823c653684f94f6b6df))
+* **scraper:** anonymous retry + surface partial feed on login wall ([e9cd873](https://github.com/teampostharvest/postharvest/commit/e9cd87363c69f3e88bd6f769964bcfbaf182ae3f))
+* **scraper:** conditional retry, cookie expiry surfacing, and target-scaled scroll patience ([bb2a430](https://github.com/teampostharvest/postharvest/commit/bb2a430184d76d991282dd9e23c79afd19f9a47e))
+* **scraper:** extract comments and media types from Comet graphql feed ([db7a005](https://github.com/teampostharvest/postharvest/commit/db7a0053d9279281e2aa8bb91ba6fa23137ebdaa))
+* **scraper:** login-wall retry + full final DOM capture + live progress ([ebf7931](https://github.com/teampostharvest/postharvest/commit/ebf7931e208c25d9e3b55b4f547c7d314cc6664e))
+* **scraper:** resolve HR-reported data integrity bugs ([d09a80f](https://github.com/teampostharvest/postharvest/commit/d09a80fe68cd680c5118546a3b8a7f1ff332dea1))
+* **scraper:** retry cookies twice before falling back anonymous ([99c7bc7](https://github.com/teampostharvest/postharvest/commit/99c7bc74349580fc24434f0ab544ee2cdb41b948))
+* surface browser scrape publish errors in CLI normalize step ([99d50b2](https://github.com/teampostharvest/postharvest/commit/99d50b259b60ceb00f27cbfb6078a5a5207dd160))
+* **tests:** make capture ws bridge forwarding deterministic ([91820b3](https://github.com/teampostharvest/postharvest/commit/91820b3994a4f97e4282667b65e763bf8465e8a5))
+
+
+### Features
+
+* **accounts:** add saved Facebook session management API ([025f3a5](https://github.com/teampostharvest/postharvest/commit/025f3a54fe485435e54a44dfb8e49d57298de785))
+* always-center and enlarge the capture dialogs ([6f5b80c](https://github.com/teampostharvest/postharvest/commit/6f5b80c0b2c81e39c8abed6a1b71e73038d56501))
+* **auth:** implement Firebase authentication and multitenancy architecture ([e654ec3](https://github.com/teampostharvest/postharvest/commit/e654ec360a4fa7cf753710857ca6bb95e82ee6f0))
+* **auth:** merge auth feature into testing ([54ad435](https://github.com/teampostharvest/postharvest/commit/54ad43542f704c1b6a756277e94e9839bb5d0148))
+* **backend:** add browser-mode scrape fields and paginated job list API ([3995e92](https://github.com/teampostharvest/postharvest/commit/3995e9249ce61741ad08f974f7d7a410307d1a7b))
+* **browser:** click timeline tab, snapshot-accumulate feed, capture graphql responses ([f7cc4e6](https://github.com/teampostharvest/postharvest/commit/f7cc4e68ed3f606a9b3e4840ad76fabfab933f61))
+* firebase auth, per-user isolation, and tier enforcement ([c4c4433](https://github.com/teampostharvest/postharvest/commit/c4c4433de077f157613ae96fdd820199ddc3a87c))
+* **frontend:** add all new pages — investigation, docs, history, settings, accounts ([7bef304](https://github.com/teampostharvest/postharvest/commit/7bef304e9835cb26a07dd96c124ac58a047007b6))
+* **frontend:** collapse URL form once a job starts ([afaaf16](https://github.com/teampostharvest/postharvest/commit/afaaf16106d42280a9edb04b08de0f732d5bdb34))
+* **frontend:** extract client components to page-content and add SEO ([e31da53](https://github.com/teampostharvest/postharvest/commit/e31da538aefd042ec6d35d4d9677932764577736))
+* **frontend:** migrate tailwindcss v3 to v4 ([21e9ae3](https://github.com/teampostharvest/postharvest/commit/21e9ae3de0f998740c82c2caa2c64961c2bcdd9d))
+* **frontend:** overhaul scrape form with account dropdown and auto-scroll ([0f0e628](https://github.com/teampostharvest/postharvest/commit/0f0e62856aa98ebfd98f797122cc1581820eb128))
+* **frontend:** state-driven animated investigation heading ([753cee7](https://github.com/teampostharvest/postharvest/commit/753cee7f3308d3b18ad5c14bab7ec2b864da59c0))
+* **frontend:** upgrade react and react-dom to 19.3.0 ([a11e4a0](https://github.com/teampostharvest/postharvest/commit/a11e4a04c24c70828fe71c9b16b01bd846f16036))
+* mailaccess-style split-screen sign-in ([645f44b](https://github.com/teampostharvest/postharvest/commit/645f44be545ff6d9dac4a43d7c3e1961e38160f2))
+* make alembic the schema owner for deployments ([dd3dcf1](https://github.com/teampostharvest/postharvest/commit/dd3dcf1aab97fa31f1098314ea7d51b37fc417be))
+* mirror cookie jars to Supabase and replace credential login with live session capture ([59962f1](https://github.com/teampostharvest/postharvest/commit/59962f1b7f4f21e75483beacaa694402ab90b60e))
+* **parser:** extract posts from embedded Comet graphql feed payloads ([af3df20](https://github.com/teampostharvest/postharvest/commit/af3df205d2d389c9e135df468c47c160c74e5c3d))
+* pipe the live Facebook login page into the capture viewer ([86db5df](https://github.com/teampostharvest/postharvest/commit/86db5df0d077304206503572dd2ac0925e291b0b))
+* **pricing:** add pricing page and top-nav menu ([df4861e](https://github.com/teampostharvest/postharvest/commit/df4861e737692068226a99e35bcc92dae54a909a))
+* **progress:** show percent + ETA + live links box while scraping ([e433549](https://github.com/teampostharvest/postharvest/commit/e433549bc868afa0516d9eb56cf9fc4a42d81609))
+* public landing home, top-right sign-in, drop debug badges ([e58a6b8](https://github.com/teampostharvest/postharvest/commit/e58a6b85a0efdc3dcff7b6f406ca2e401cd75e3c))
+* serve the session-capture viewer same-origin via CDP proxy ([9d1b1d3](https://github.com/teampostharvest/postharvest/commit/9d1b1d3886965c8fd22c7a6c68d8f2ce59cf4653))
