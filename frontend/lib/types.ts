@@ -181,10 +181,11 @@ export interface AdminUser {
 export const PLAN_LABELS: Record<string, string> = {
   basic: "Basic",
   pro: "Pro",
+  team: "Team",
   enterprise: "Enterprise",
 };
 
-export type PlanName = "basic" | "pro" | "enterprise";
+export type PlanName = "basic" | "pro" | "team" | "enterprise";
 
 /** User profile returned by GET /api/auth/me */
 export interface UserProfile {

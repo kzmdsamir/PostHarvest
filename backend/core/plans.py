@@ -1,10 +1,10 @@
 """Subscription tiers and their enforced limits.
 
-Tiers: Basic / Pro / Enterprise (locked decision, 2026-09-17).
+Tiers: Basic / Pro / Team / Enterprise.
 
 Limits are enforced backend-side at the API layer:
 
-* ``urls``            — max URLs accepted per scrape job
+* ``urls``            — max URLs accepted per scrape job (None = global cap only)
 * ``max_posts``       — max posts captured per source (None = global cap only)
 * ``concurrent_jobs`` — max queued+running jobs per user
 * ``personal_accounts`` — max self-owned Facebook sessions per user
@@ -12,7 +12,7 @@ Limits are enforced backend-side at the API layer:
 """
 from __future__ import annotations
 
-PLANS: tuple[str, ...] = ("basic", "pro", "enterprise")
+PLANS: tuple[str, ...] = ("basic", "pro", "team", "enterprise")
 
 PLAN_LIMITS: dict[str, dict] = {
     "basic": {
@@ -22,14 +22,22 @@ PLAN_LIMITS: dict[str, dict] = {
         "personal_accounts": 1,
     },
     "pro": {
-        "urls": 20,
+        "urls": 50,
         "max_posts": 5_000,
         "concurrent_jobs": 3,
         "personal_accounts": 5,
     },
-    "enterprise": {
-        "urls": 100,
+    "team": {
+        "urls": 150,
         "max_posts": 100_000,
+        "concurrent_jobs": 10,
+        "personal_accounts": 25,
+    },
+    "enterprise": {
+        # No per-plan ceiling — the global MAX_URLS_PER_JOB / max_posts caps
+        # stay as the only bound, and support/concurrency are negotiated.
+        "urls": None,
+        "max_posts": None,
         "concurrent_jobs": 10,
         "personal_accounts": None,  # unlimited
     },

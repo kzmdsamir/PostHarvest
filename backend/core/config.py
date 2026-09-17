@@ -99,7 +99,9 @@ class Settings(BaseSettings):
 
     # --- worker / job manager ---------------------------------------------------
     worker_threads: int = 4
-    max_urls_per_job: int = 100
+    # Global hard cap per job, applied on top of per-plan URL limits. Must sit
+    # above the highest plan ceiling (Team = 150) so plan numbers are reachable.
+    max_urls_per_job: int = 300
     default_max_posts: int | None = None
     default_post_type: str = "all"
     # How long DELETE /api/jobs/{id} waits for the background worker to stop
