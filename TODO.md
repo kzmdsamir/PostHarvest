@@ -101,9 +101,7 @@ Status snapshot: 2026-09-17. Legend: **✅** done to this stage · **⬜** pendi
 
 ## Who did what
 
-| Who | Email | Contributions |
-|---|---|---|
-| **Reza** (project owner) | reza1234khan1234@gmail.com | Author of the whole project: scraper core, API + CLI, frontend, Docker/deploy tooling, docs; directed the release-engineering stage (92 commits under git identities `Sagittarius` / `イムティヤズ` / `apocalypse`) |
-| **Claude** (AI coding assistant, via OpenCode on Reza's machine) | — | Executed under direction: semantic-release wiring, branch ladder + `production` branch, commitlint/husky, CI trigger fixes, CONTRIBUTING / CoC / issue + PR templates, promote script + live promote runs (v1.0.0, v1.0.1), production marker sync, this TODO |
-| **Kazi Samir** | kzsamir849@gmail.com | Earlier foundation-era maintainer (kzmdsamir-era `main`/`production` branches — fully superseded and removed); 31 commits |
-| **dependabot[bot]** | 49699333+dependabot[bot]@users.noreply.github.com | Automated dependency bumps (backend, frontend); 16 commits |
+- Reza — reza1234khan1234@gmail.com — core scraper, API + CLI, frontend, Docker tooling, docs (92 commits)
+- Claude — n/a (AI assistant) — release tooling, promote script, CI fixes, CONTRIBUTING/CoC/templates, this TODO
+- Kazi Samir — kzsamir849@gmail.com — earlier foundation work, superseded (31 commits)
+- dependabot[bot] — 49699333+dependabot[bot]@users.noreply.github.com — automated dependency bumps (16 commits)
