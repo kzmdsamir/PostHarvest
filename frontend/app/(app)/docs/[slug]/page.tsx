@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { Eyebrow, PageHeading } from "@/components/display";
+import { Eyebrow, PageHeading } from "@/components/views/Display";
 import { DOCS_PAGES, findDocsPage } from "@/lib/docs-meta";
 import { getDocsBody } from "../content";
 

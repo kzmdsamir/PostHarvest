@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, FileX2, Link2, MapPin, RefreshCcw } from "lucide-react";
-import { ApiErrorBanner } from "@/components/api-error-banner";
+import { ApiErrorBanner } from "@/components/features/scraper/ApiErrorBanner";
 import { Button } from "@/components/ui/button";
 import { safeHttpUrl, type ApiError } from "@/lib/api";
 import type { JobErrorDetail, JobProgress, SourceProgress } from "@/lib/types";

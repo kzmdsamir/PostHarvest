@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
-import { Eyebrow, PageHeading } from "@/components/display";
+import { Eyebrow, PageHeading } from "@/components/views/Display";
 import { DOCS_SECTIONS, findDocsPage } from "@/lib/docs-meta";
 import { getDocsBody } from "./content";
 

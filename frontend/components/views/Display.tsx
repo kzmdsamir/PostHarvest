@@ -1,4 +1,4 @@
-import type { HTMLAttributes, ReactNode } from "react";
+import type { HTMLAttributes, LabelHTMLAttributes, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -57,7 +57,7 @@ export function StatBox({ label, value, className, ...props }: StatBoxProps) {
   );
 }
 
-export function FieldLabel({ className, ...props }: HTMLAttributes<HTMLLabelElement>) {
+export function FieldLabel({ className, ...props }: LabelHTMLAttributes<HTMLLabelElement>) {
   return (
     <label
       className={cn(
