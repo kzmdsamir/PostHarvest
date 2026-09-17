@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Moon, Sun } from "lucide-react";
-import { AppSidebar } from "@/components/app-sidebar";
-import { SignInScreen } from "@/components/sign-in-screen";
+import { AppSidebar } from "@/components/common/AppSidebar";
+import { SignInScreen } from "@/components/views/SignInScreen";
 import { useAuth } from "@/lib/auth-context";
-import { useTheme } from "@/components/theme-provider";
+import { useTheme } from "@/components/common/ThemeProvider";
 import { cn } from "@/lib/utils";
 
 /**

@@ -2,7 +2,7 @@
 
 import { Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Eyebrow, PageHeading } from "@/components/display";
+import { Eyebrow, PageHeading } from "@/components/views/Display";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 

@@ -7,7 +7,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { BookOpen, ChevronDown, CreditCard, History, Home, KeyRound, ScanLine, Settings } from "lucide-react";
 import { DOCS_SECTIONS } from "@/lib/docs-meta";
 import { cn } from "@/lib/utils";
-import { UserNav } from "@/components/UserNav";
+import { UserNav } from "@/components/common/UserNav";
 
 function NavLink({
   href,

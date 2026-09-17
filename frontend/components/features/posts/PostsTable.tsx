@@ -11,7 +11,7 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { ApiErrorBanner } from "@/components/api-error-banner";
+import { ApiErrorBanner } from "@/components/features/scraper/ApiErrorBanner";
 import { Badge, type BadgeVariant } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";

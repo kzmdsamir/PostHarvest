@@ -10,7 +10,7 @@ import {
   ThumbsUp,
   Video,
 } from "lucide-react";
-import { ApiErrorBanner } from "@/components/api-error-banner";
+import { ApiErrorBanner } from "@/components/features/scraper/ApiErrorBanner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Post } from "@/lib/types";
 import { formatCompact, formatNumber, pluralize } from "@/lib/utils";
