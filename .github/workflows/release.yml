@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    branches: [main, beta, alpha]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: Semantic Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history + tags are required for version analysis and grafting.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Release
+        run: npx semantic-release
+        env:
+          # Used by @semantic-release/github. The release commit message carries
+          # "[skip ci]" so this workflow does not re-trigger on its own push.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
