@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/teampostharvest/postharvest/compare/v1.0.0...v1.0.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **scripts:** continue ladder past a non-master hop ([91db989](https://github.com/teampostharvest/postharvest/commit/91db98947f0defc011a3562d6ffebba4ff7b2301))
+
 # 1.0.0 (2026-09-17)
 
 
