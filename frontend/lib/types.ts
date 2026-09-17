@@ -158,7 +158,7 @@ export interface PersonalLoginRequest {
   password: string;
 }
 
-/** Response from POST /api/accounts/capture — the pipe link to open. */
+/** Response from POST /api/accounts/capture — the same-origin viewer link to open. */
 export interface SessionCaptureOut {
   capture_id: string;
   name: string;

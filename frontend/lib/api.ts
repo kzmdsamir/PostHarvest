@@ -323,7 +323,7 @@ export const api = {
     });
   },
 
-  /** POST /api/accounts/capture — start a live session capture (returns a pipe link to open). */
+  /** POST /api/accounts/capture — start a live session capture (returns a same-origin viewer link to open). */
   async startSessionCapture(payload: { name: string; scope: "ops" | "me" }): Promise<SessionCaptureOut> {
     return request<SessionCaptureOut>("/api/accounts/capture", {
       method: "POST",
