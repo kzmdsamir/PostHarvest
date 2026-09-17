@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { ExportArea } from "@/components/features/posts/ExportArea";
 import { api } from "@/lib/api";
@@ -38,7 +38,7 @@ describe("ExportArea", () => {
   });
 
   it("calls api.exportJobDownload on format button click", async () => {
-    vi.mocked(api.exportJobDownload).mockResolvedValueOnce(undefined as any);
+    vi.mocked(api.exportJobDownload).mockResolvedValueOnce(undefined);
     render(
       <ExportArea jobId="job-abc" status="completed" onNewScrape={vi.fn()} />
     );
