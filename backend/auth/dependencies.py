@@ -49,6 +49,21 @@ async def get_current_user(
     return user
 
 
+async def require_ops(current_user: User = Depends(get_current_user)) -> User:
+    """Require the caller to hold the ``ops`` (operator/admin) role.
+
+    Used to gate admin endpoints (user/role/plan management, ops-pool
+    cookie mutations) that must never be reachable by regular users.
+    """
+    if getattr(current_user, "role", None) != "ops":
+        raise AppError(
+            "Operator privileges required",
+            status_code=403,
+            code="admin_required",
+        )
+    return current_user
+
+
 async def get_optional_user(
     authorization: str = Header(default="", alias="Authorization"),
     db: Session = Depends(get_db),

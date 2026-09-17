@@ -1,0 +1,74 @@
+name: Bug report
+description: Something isn't working as expected
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Please fill in what you can —
+        the more context, the faster we can reproduce it.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what actually happened instead?
+      placeholder: "Expected the job to finish with a summary, but it failed with..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps. Include the URLs or scrape targets you used.
+      placeholder: |
+        1. Open Investigation
+        2. Enter a public Facebook page URL
+        3. Start the job
+        4. See the error
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of the system is affected?
+      multiple: true
+      options:
+        - Backend (API / scraper / jobs)
+        - Frontend (UI / navigation / forms)
+        - Auth / accounts / sessions
+        - Database / migrations
+        - Deployment / infra
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Where did you see it? (local `make dev`, deployed stack, etc.)
+      placeholder: "deployed stack on eos, docker compose prod"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Relevant backend logs, browser console output, or screenshots.
+        **Redact any credentials before pasting.**
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I removed all secrets / credentials from the details above
+          required: true

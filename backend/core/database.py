@@ -20,6 +20,7 @@ per progress ping) so a long-scraping source never holds a transaction open.
 """
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from backend.core.config import get_settings
+
+logger = logging.getLogger("db")
 
 
 class Base(DeclarativeBase):
@@ -86,13 +89,73 @@ def _sqlite_pragmas(dbapi_connection, _connection_record) -> None:  # noqa: ANN0
 def init_db() -> None:
     """Create all tables if they do not exist.
 
-    Alembic migrations are optional for this project; create_all is the
-    documented simple path. Importing ``backend.models`` registers every model
-    on ``Base.metadata``.
+    Alembic owns the schema on deployed environments: the prod backend entry
+    point runs ``alembic upgrade head`` before uvicorn boots
+    (docker-compose.prod.yml).  ``create_all`` remains here as the idempotent
+    dev/test convenience (it never alters existing tables — new columns on a
+    worked database MUST ship as regular Alembic migrations, not schema
+    additions here).  Importing ``backend.models`` registers every model on
+    ``Base.metadata``.  ``_migrate_additive_columns`` is the legacy shim that
+    reconciled pre-Alembic dev databases; new columns go through Alembic.
     """
     from backend import models  # noqa: F401  (side effect: register models)
 
     Base.metadata.create_all(bind=engine)
+    _migrate_additive_columns()
+
+    # 2026-09-17: one-time mirror import — seed the saved_accounts table from
+    # existing on-disk cookie jars (no-op once it has rows). Best-effort: a
+    # failure must never block boot.
+    try:
+        from backend.scraper.browser_scraper import import_cookie_files_to_db
+
+        import_cookie_files_to_db()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("saved_accounts import at boot failed: %s", exc)
+
+
+def _migrate_additive_columns() -> None:
+    """Additive, idempotent schema upgrades for shipped tables.
+
+    ``create_all`` never alters existing tables, so columns introduced after
+    a table first shipped on a worked database would silently be absent.
+    Inspect each table and ``ALTER TABLE ... ADD COLUMN`` only what is missing.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    _dialect = engine.dialect.name
+
+    # 2026-09-15: API supplies ETA — jobs carry a nullable started_at.
+    existing_columns = {
+        col["name"] for col in inspector.get_columns("scrape_jobs")
+    }
+    if "started_at" not in existing_columns:
+        # SQLite has no ALTER with IF NOT EXISTS; PostgreSQL accepts plain
+        # ADD COLUMN. Both are idempotent behind this existence check.
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE scrape_jobs "
+                    "ADD COLUMN started_at TIMESTAMP NULL"
+                )
+            )
+
+    # 2026-09-17: user roles (ops/user) for accounts + admin tiers.
+    user_columns = {col["name"] for col in inspector.get_columns("users")}
+    if "role" not in user_columns:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE users "
+                    "ADD COLUMN role VARCHAR(32) NOT NULL DEFAULT 'user'"
+                )
+            )
+    # The tier rollout renamed the effective default plan "free" -> "basic".
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE users SET plan = 'basic' WHERE plan = 'free' OR plan IS NULL")
+        )
 
 
 def get_db():

@@ -319,6 +319,7 @@ def insert_completed_job(
             pages_completed=pages_completed,
             posts_found=len(posts_list),
             posts_processed=len(posts_list) if status == "completed" else 0,
+            started_at=_now_utc() if status == "completed" else None,
             options=options
             or {"urls": [PAGE_URL], "max_posts": None, "post_type": "text"},
         )
@@ -389,6 +390,10 @@ def _parse_iso(value: Any) -> datetime | None:
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
     return datetime.fromisoformat(text)
+
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def error_envelope(body: dict) -> dict:

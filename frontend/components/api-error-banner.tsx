@@ -37,7 +37,7 @@ export function ApiErrorBanner({
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
         <div className="min-w-0">
           <p className="text-sm font-semibold leading-5">{title}</p>
-          <p className="mt-0.5 break-words text-sm opacity-90">{message}</p>
+          <p className="mt-0.5 wrap-break-word text-sm opacity-90">{message}</p>
         </div>
       </div>
       {onRetry ? (

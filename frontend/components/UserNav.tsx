@@ -1,14 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { useAuth } from "@/lib/auth-context";
-import { AuthModal } from "./AuthModal";
-import { LogIn, LogOut, User as UserIcon, Shield } from "lucide-react";
+import { PLAN_LABELS } from "@/lib/types";
+import { LogOut, User as UserIcon } from "lucide-react";
 
 export function UserNav() {
   const { user, profile, loading, signOut } = useAuth();
-  const [modalOpen, setModalOpen] = useState(false);
-  const [modalTab, setModalTab] = useState<"login" | "signup">("login");
 
   if (loading) {
     return (
@@ -18,37 +16,9 @@ export function UserNav() {
     );
   }
 
+  // Signed-out visitors sign in from the top bar, so nothing is rendered here.
   if (!user) {
-    return (
-      <>
-        <div className="px-3 py-2 space-y-2">
-          <button
-            onClick={() => {
-              setModalTab("login");
-              setModalOpen(true);
-            }}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded-lg transition-colors shadow-sm"
-          >
-            <LogIn className="w-3.5 h-3.5" />
-            <span>Sign In</span>
-          </button>
-          <button
-            onClick={() => {
-              setModalTab("signup");
-              setModalOpen(true);
-            }}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 font-medium text-xs rounded-lg transition-colors border border-neutral-700/60"
-          >
-            <span>Create Account</span>
-          </button>
-        </div>
-        <AuthModal
-          isOpen={modalOpen}
-          onClose={() => setModalOpen(false)}
-          defaultTab={modalTab}
-        />
-      </>
-    );
+    return null;
   }
 
   return (
@@ -64,7 +34,7 @@ export function UserNav() {
             </p>
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="inline-flex items-center px-1.5 py-0.2 text-[9px] font-semibold tracking-wider text-blue-400 bg-blue-500/10 rounded uppercase">
-                {profile?.plan || "Free"} Plan
+                {PLAN_LABELS[profile?.plan ?? ""] ?? "Free"} Plan
               </span>
             </div>
           </div>

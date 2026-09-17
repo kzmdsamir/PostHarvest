@@ -10,10 +10,13 @@ Every field can be overridden with an environment variable of the same name
 """
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -50,10 +53,49 @@ class Settings(BaseSettings):
     supabase_service_key: str | None = None
 
     # --- firebase authentication ------------------------------------------------
-    firebase_project_id: str | None = "postharvest-5a5bb"
+    firebase_project_id: str | None = "postharvest-firebase"
     firebase_client_email: str | None = None
     firebase_private_key: str | None = None
     firebase_credentials_path: str | None = None
+
+    # --- accounts / personal cookies -------------------------------------------
+    # Emails (comma-separated) auto-promoted to the "ops" role on first login.
+    # NoDecode stops pydantic-settings from JSON-decoding the env value first;
+    # the field validator below then accepts both JSON arrays and plain
+    # comma-separated strings.
+    ops_emails: Annotated[list[str], NoDecode] = []
+    # Fernet key used to encrypt per-user cookie files at rest. When unset,
+    # personal cookies are stored in plain JSON (dev only; set this in prod).
+    cookie_encryption_key: str | None = None
+    # Max seconds a server-side personal-cookie Facebook login may take.
+    personal_login_timeout_seconds: float = 90.0
+    # --- session capture (live browser login) ----------------------------------
+    # The capture browser binds a Chromium remote-debugging (CDP) endpoint on
+    # loopback inside the backend container. Nothing is published to the host:
+    # the API proxies the DevTools frontend and bridges its websocket, so the
+    # whole flow stays on the app's own origin (works from any device).
+    session_capture_port: int = 9333
+    # Max seconds to wait for the user to finish logging in before cleanup.
+    session_capture_timeout_seconds: float = 240.0
+
+    @field_validator("ops_emails", mode="before")
+    @classmethod
+    def _parse_ops_emails(cls, value):  # noqa: ANN001
+        """Accept either a JSON array or a plain comma-separated string.
+
+        pydantic-settings would otherwise demand JSON for list fields, which
+        makes ``OPS_EMAILS=a@x.com,b@x.com`` crash the app at boot.
+        """
+        if isinstance(value, str):
+            value = value.strip()
+            if value.startswith("["):
+                try:
+                    parsed = json.loads(value)
+                    return parsed if isinstance(parsed, list) else []
+                except json.JSONDecodeError:
+                    return []
+            return [part.strip() for part in value.split(",") if part.strip()]
+        return value
 
     # --- worker / job manager ---------------------------------------------------
     worker_threads: int = 4

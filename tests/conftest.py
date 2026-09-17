@@ -76,6 +76,7 @@ init_db()
 _CLEANUP_MODELS = (
     "ExportJob",
     "ScrapeError",
+    "SavedAccount",
     "CrawlState",
     "Media",
     "EngagementMetric",
@@ -159,6 +160,10 @@ def authed_client(client, auth_headers):
             kwargs["headers"] = self._merge_headers(kwargs.get("headers"))
             return self.inner.put(url, **kwargs)
 
+        def patch(self, url, **kwargs):
+            kwargs["headers"] = self._merge_headers(kwargs.get("headers"))
+            return self.inner.patch(url, **kwargs)
+
     return AuthedClient(client)
 
 
@@ -169,9 +174,24 @@ def _clean_database():
     from sqlalchemy import delete
 
     from backend import models as m
+    from backend.core.config import get_settings
     from backend.core.database import SessionLocal
 
     with SessionLocal() as db:
         for name in _CLEANUP_MODELS:
             db.execute(delete(getattr(m, name)))
-        db.commit()
+        db.commit()
+
+    # Cookie stores are filesystem state, not DB rows: SQLite reuses user ids
+    # after a wipe, so stale data/personal/{id}/ dirs would leak personal
+    # accounts (and the plan cap) into the next test. Clear them too.
+    import shutil
+    from pathlib import Path
+
+    data_dir = Path(get_settings().data_dir)
+    personal = data_dir / "personal"
+    if personal.exists():
+        shutil.rmtree(personal, ignore_errors=True)
+    for pattern in ("fb_cookies*.json", "fb_credentials.json"):
+        for p in data_dir.glob(pattern):
+            p.unlink(missing_ok=True)

@@ -45,6 +45,7 @@ exports/
 .env
 .env*.local
 .env*.secret
+certs/
 
 # --- OS / editor ----------------------------------------------------------
 .DS_Store

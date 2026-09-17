@@ -6,18 +6,24 @@
  * text (we never use dangerouslySetInnerHTML anywhere in this app).
  */
 import type {
+  AccountSession,
   AccountsResponse,
+  SessionCaptureOut,
+  AdminUser,
   ApiErrorBody,
   ExportFormat,
   JobListResponse,
   JobProgress,
   JobStatus,
   PaginatedPosts,
+  PersonalLoginRequest,
   Post,
   ScrapeRequest,
   ScrapeResponse,
   UserProfile,
 } from "./types";
+
+import { EXPORT_FILENAMES } from "./types";
 
 /** Resolved at build time. Defaults to the local backend. */
 export const API_BASE: string = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/+$/, "");
@@ -88,6 +94,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // Non-JSON error body — keep the generic message.
     }
+
+    // Stale/expired session → hard redirect to the login page (app routes are
+    // gated; the login page itself must never bounce on its own 401s).
+    if (
+      response.status === 401 &&
+      typeof window !== "undefined" &&
+      window.location.pathname !== "/login" &&
+      ["auth_required", "invalid_token", "account_disabled", "expired_id_token"].includes(code)
+    ) {
+      window.location.replace("/login");
+    }
     throw new ApiError({ status: response.status, code, message });
   }
 
@@ -105,6 +122,7 @@ function normalizeJob(raw: Partial<JobProgress>): JobProgress {
     rawStatus === "running" ||
     rawStatus === "queued" ||
     rawStatus === "paused";
+  const rawSources = Array.isArray(raw?.sources) ? raw.sources : [];
   return {
     job_id: raw?.job_id ?? null,
     status: known ? (rawStatus as JobProgress["status"]) : "queued",
@@ -115,6 +133,17 @@ function normalizeJob(raw: Partial<JobProgress>): JobProgress {
     duplicates: raw?.duplicates ?? null,
     errors: raw?.errors ?? null,
     error_details: raw?.error_details ?? [],
+    started_at: raw?.started_at ?? null,
+    completed_at: raw?.completed_at ?? null,
+    max_posts: raw?.max_posts ?? null,
+    sources: rawSources.map((s) => ({
+      url: s?.url ?? "",
+      status: s?.status ?? "queued",
+      posts_found: s?.posts_found ?? 0,
+      posts_processed: s?.posts_processed ?? 0,
+      error_code: s?.error_code ?? null,
+      error_message: s?.error_message ?? null,
+    })),
   };
 }
 
@@ -204,9 +233,72 @@ export const api = {
     });
   },
 
-  /** Absolute URL for the live export endpoints (JSON/CSV/XLSX). */
-  getExportUrl(jobId: string, format: ExportFormat): string {
-    return `${API_BASE}/api/jobs/${encodeURIComponent(jobId)}/export/${format}`;
+  /**
+   * GET /api/jobs/{job_id}/export/{format} — stream a job's results as
+   * JSON/CSV/XLSX. Fetches with the Firebase bearer token (headed requests
+   * only; a plain navigation carries no auth) and triggers a browser download
+   * with the canonical filename. Throws ApiError on failure.
+   */
+  async exportJobDownload(jobId: string, format: ExportFormat): Promise<void> {
+    const url = `${API_BASE}/api/jobs/${encodeURIComponent(jobId)}/export/${format}`;
+    const headers: Record<string, string> = { Accept: "application/json" };
+
+    try {
+      const { auth } = await import("./firebase");
+      if (auth.currentUser) {
+        const token = await auth.currentUser.getIdToken();
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+      }
+    } catch {
+      // firebase chunks unavailable (build/SSR) — the request below will 401.
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(url, { cache: "no-store", headers });
+    } catch {
+      throw new ApiError({
+        code: "network_error",
+        message: `API unreachable at ${API_BASE}. Is the backend running?`,
+      });
+    }
+
+    if (!response.ok) {
+      let code = "http_error";
+      let message = `Export failed with status ${response.status}.`;
+      try {
+        const body = (await response.json()) as Partial<ApiErrorBody> | null;
+        if (body?.error) {
+          code = typeof body.error.code === "string" ? body.error.code : code;
+          message = typeof body.error.message === "string" ? body.error.message : message;
+        }
+      } catch {
+        // Non-JSON error body — keep the generic message.
+      }
+
+      // Stale/expired session → same hard redirect the rest of the API uses.
+      if (
+        response.status === 401 &&
+        typeof window !== "undefined" &&
+        window.location.pathname !== "/login" &&
+        ["auth_required", "invalid_token", "account_disabled", "expired_id_token"].includes(code)
+      ) {
+        window.location.replace("/login");
+      }
+      throw new ApiError({ status: response.status, code, message });
+    }
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = EXPORT_FILENAMES[format];
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
   },
 
   /** GET /api/jobs — paginated history, newest first. */
@@ -218,9 +310,32 @@ export const api = {
     return request<JobListResponse>(`/api/jobs${suffix}`);
   },
 
-  /** GET /api/accounts — saved sessions (metadata only, no cookie contents). */
+  /** GET /api/accounts — saved sessions split by tier (ops pool + my own). */
   async listAccounts(): Promise<AccountsResponse> {
     return request<AccountsResponse>("/api/accounts");
+  },
+
+  /** POST /api/accounts/personal — server-side Facebook login for a personal session. */
+  async addPersonalAccount(payload: PersonalLoginRequest): Promise<AccountSession> {
+    return request<AccountSession>("/api/accounts/personal", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /** POST /api/accounts/capture — start a live session capture (returns a same-origin viewer link to open). */
+  async startSessionCapture(payload: { name: string; scope: "ops" | "me" }): Promise<SessionCaptureOut> {
+    return request<SessionCaptureOut>("/api/accounts/capture", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /** DELETE /api/accounts/capture/{capture_id} — abort a running capture (best-effort). */
+  async cancelSessionCapture(captureId: string): Promise<void> {
+    return request<void>(`/api/accounts/capture/${encodeURIComponent(captureId)}`, {
+      method: "DELETE",
+    });
   },
 
   /** GET /api/auth/me */
@@ -228,9 +343,34 @@ export const api = {
     return request<UserProfile>("/api/auth/me");
   },
 
-  /** DELETE /api/accounts/{name} — remove a saved session. */
-  async deleteAccount(name: string): Promise<void> {
-    return request<void>(`/api/accounts/${encodeURIComponent(name)}`, { method: "DELETE" });
+  /** DELETE /api/accounts/{scope}/{name} — remove a saved session (ops role gates the ops scope). */
+  async deleteAccount(scope: string, name: string): Promise<void> {
+    return request<void>(`/api/accounts/${encodeURIComponent(scope)}/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+  },
+
+  // --- operator admin (ops role only; backend returns 403 otherwise) ---------
+
+  /** GET /api/admin/users */
+  async adminListUsers(): Promise<AdminUser[]> {
+    return request<AdminUser[]>("/api/admin/users");
+  },
+
+  /** PATCH /api/admin/users/{id}/role */
+  async adminSetRole(userId: number, role: string): Promise<AdminUser> {
+    return request<AdminUser>(`/api/admin/users/${userId}/role`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    });
+  },
+
+  /** PATCH /api/admin/users/{id}/plan */
+  async adminSetPlan(userId: number, plan: string): Promise<AdminUser> {
+    return request<AdminUser>(`/api/admin/users/${userId}/plan`, {
+      method: "PATCH",
+      body: JSON.stringify({ plan }),
+    });
   },
 };
 

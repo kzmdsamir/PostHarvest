@@ -41,7 +41,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY frontend/package.json frontend/package-lock.json \
      frontend/tsconfig.json frontend/next-env.d.ts \
      frontend/next.config.mjs frontend/postcss.config.mjs \
-     frontend/tailwind.config.ts frontend/eslint.config.mjs ./
+     frontend/eslint.config.mjs ./
 RUN npm ci
 
 COPY frontend/app ./app

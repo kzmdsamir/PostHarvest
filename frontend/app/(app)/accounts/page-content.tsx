@@ -1,26 +1,59 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { KeyRound, RefreshCw, Trash2 } from "lucide-react";
+import { ExternalLink, KeyRound, Loader2, Plus, RefreshCw, Trash2, Users } from "lucide-react";
 import { api } from "@/lib/api";
-import type { AccountSession } from "@/lib/types";
+import { useAuth } from "@/lib/auth-context";
+import type { AccountSession, SessionCaptureOut } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogSection } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+
+function StatusBadge({ status }: { status?: string | null }) {
+  const valid = status === "VALID";
+  return (
+    <span
+      className={
+        "inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider " +
+        (valid
+          ? "border-green-700/40 bg-green-700/10 text-green-700"
+          : "border-amber-700/40 bg-amber-700/10 text-amber-700")
+      }
+    >
+      {valid ? "valid" : "expired"}
+    </span>
+  );
+}
 
 export default function AccountsPage() {
-  const [items, setItems] = useState<AccountSession[]>([]);
-  const [total, setTotal] = useState(0);
+  const { profile } = useAuth();
+  const isOps = profile?.role === "ops";
+
+  const [ops, setOps] = useState<AccountSession[]>([]);
+  const [mine, setMine] = useState<AccountSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+
+  // Live session-capture flow (replaces the old email/password form — Facebook
+  // shows a CAPTCHA on fresh logins, so the user signs in in a new tab instead).
+  const [addOpen, setAddOpen] = useState(false);
+  const [addScope, setAddScope] = useState<"me" | "ops">("me");
+  const [addName, setAddName] = useState("");
+  const [capture, setCapture] = useState<SessionCaptureOut | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await api.listAccounts();
-      setItems(res.items);
-      setTotal(res.total);
+      setOps(res.ops);
+      setMine(res.mine);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load saved sessions");
     } finally {
@@ -33,11 +66,11 @@ export default function AccountsPage() {
   }, [load]);
 
   const handleDelete = useCallback(
-    async (name: string) => {
-      setDeleting(name);
+    async (scope: string, name: string) => {
+      setDeleting(`${scope}/${name}`);
       setError(null);
       try {
-        await api.deleteAccount(name);
+        await api.deleteAccount(scope, name);
         await load();
       } catch (e) {
         setError(e instanceof Error ? e.message : `Could not remove "${name}"`);
@@ -48,6 +81,115 @@ export default function AccountsPage() {
     [load],
   );
 
+  const openAdd = (scope: "me" | "ops") => {
+    setAddScope(scope);
+    setAddName("");
+    setCapture(null);
+    setAdding(false);
+    setAddError(null);
+    setWaiting(false);
+    setAddOpen(true);
+  };
+
+  const closeAdd = () => {
+    setAddOpen(false);
+    setAddError(null);
+    setCapture(null);
+    setWaiting(false);
+  };
+
+  const handleStartCapture = async () => {
+    setAddError(null);
+    setAdding(true);
+    try {
+      const info = await api.startSessionCapture({ name: addName.trim(), scope: addScope });
+      setCapture(info);
+      setWaiting(true);
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : "Could not start session capture");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const openLoginTab = () => {
+    if (!capture) return;
+    window.open(capture.url, "_blank", "noopener,noreferrer");
+  };
+
+  const handleCancelCapture = async () => {
+    if (capture) {
+      try {
+        await api.cancelSessionCapture(capture.capture_id);
+      } catch {
+        // best-effort — the capture also expires server-side
+      }
+    }
+    closeAdd();
+  };
+
+  // While a capture is waiting, poll the account list so the new session
+  // appears as soon as the backend saves it.
+  useEffect(() => {
+    if (!waiting || !capture) return;
+    const timer = setInterval(() => {
+      void load();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [waiting, capture, load]);
+
+  // When the captured account lands in the list, the flow is complete.
+  useEffect(() => {
+    if (!waiting || !capture) return;
+    const delivered = (addScope === "ops" ? ops : mine).some((a) => a.name === capture.name);
+    if (delivered) {
+      setCapture(null);
+      setWaiting(false);
+      setAddOpen(false);
+    }
+  }, [waiting, capture, mine, ops, addScope]);
+
+  const total = ops.length + mine.length;
+
+  const renderRow = (account: AccountSession) => (
+    <li key={`${account.scope}/${account.name}`} className="flex items-center gap-4 py-3">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-border text-muted-foreground">
+        <KeyRound className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-2 text-sm font-medium">
+          {account.name}
+          <StatusBadge status={account.status} />
+        </p>
+        <p className="truncate text-xs text-muted-foreground">
+          {account.scope === "me" ? "personal session" : "operator pool"}
+          {account.saved_at ? ` · saved ${formatDateTime(account.saved_at)}` : ""}
+        </p>
+      </div>
+      {account.scope === "ops" && !isOps ? (
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">managed</span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void handleDelete(account.scope, account.name)}
+          disabled={deleting === `${account.scope}/${account.name}`}
+          className="flex items-center gap-1.5 rounded-sm border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground disabled:opacity-50"
+        >
+          <Trash2 className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+          {deleting === `${account.scope}/${account.name}` ? "removing…" : "remove"}
+        </button>
+      )}
+    </li>
+  );
+
+  if (loading && total === 0) {
+    return (
+      <div className="animate-fade-in-up">
+        <p className="py-12 text-center text-sm text-muted-foreground">loading sessions…</p>
+      </div>
+    );
+  }
+
   return (
     <div className="animate-fade-in-up space-y-6">
       <Card>
@@ -55,15 +197,26 @@ export default function AccountsPage() {
           <div>
             <CardTitle>Saved sessions</CardTitle>
             <CardDescription className="mt-1">
-              Cookie sessions created through the CLI login flow. Only metadata is shown here; cookie contents are never
-              exposed.
+              Cookie sessions that unlock the full Facebook feed for browser scrapes. Metadata only — cookie contents
+              are never exposed.
             </CardDescription>
           </div>
-          <span className="text-xs text-muted-foreground">{total} saved</span>
+          <div className="flex items-center gap-2">
+            {isOps ? (
+              <Button type="button" variant="outline" onClick={() => openAdd("ops")}>
+                <Users className="h-3.5 w-3.5" aria-hidden="true" />
+                Add shared session
+              </Button>
+            ) : null}
+            <Button type="button" onClick={() => openAdd("me")}>
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              Add my session
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {error ? (
-            <div className="flex items-center justify-between gap-3 rounded-sm border border-border bg-muted/40 px-3 py-2.5 text-sm">
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-sm border border-border bg-muted/40 px-3 py-2.5 text-sm">
               <span className="text-muted-foreground">{error}</span>
               <button
                 type="button"
@@ -75,54 +228,125 @@ export default function AccountsPage() {
             </div>
           ) : null}
 
-          {!error && loading && items.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">loading sessions…</p>
-          ) : null}
-
-          {!error && !loading && items.length === 0 ? (
-            <div className="py-10 text-center">
-              <KeyRound className="mx-auto h-6 w-6 text-muted-foreground" strokeWidth={1.5} aria-hidden="true" />
-              <p className="mt-3 text-sm text-muted-foreground">
-                No saved sessions. Log the browser in once to speed up public scrapes:
-              </p>
-              <p className="mt-2 text-xs text-zinc-600">
-                <code className="rounded-sm bg-muted px-2 py-1">python -m backend.scraper.browser_scraper --login --account name</code>
-              </p>
+          {/* Operator pool */}
+          <section>
+            <div className="flex items-center gap-2 border-b border-border pb-2">
+              <Users className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.75} aria-hidden="true" />
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Operator pool · shared
+              </h3>
+              <span className="ml-auto text-xs text-muted-foreground">{ops.length}</span>
             </div>
-          ) : null}
+            {ops.length === 0 ? (
+              <p className="py-6 text-center text-xs text-muted-foreground">
+                No operator-managed sessions yet. Operators can add one with{" "}
+                <code className="rounded-sm bg-muted px-1.5 py-0.5">Add shared session</code> or the CLI:{" "}
+                <code className="rounded-sm bg-muted px-1.5 py-0.5">cli.py login --account NAME</code>.
+              </p>
+            ) : (
+              <ul className="divide-y divide-border">{ops.map(renderRow)}</ul>
+            )}
+          </section>
 
-          {items.length > 0 ? (
-            <ul className="divide-y divide-border">
-              {items.map((account) => (
-                <li key={account.name} className="flex items-center gap-4 py-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm border border-border text-muted-foreground">
-                    <KeyRound className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{account.name}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {account.cookies_file ?? "session"}
-                      {account.saved_at ? ` · saved ${formatDateTime(account.saved_at)}` : ""}
-                    </p>
-                  </div>
-                  {account.name === "default" ? (
-                    <span className="text-xs text-zinc-600">default</span>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(account.name)}
-                    disabled={deleting === account.name}
-                    className="flex items-center gap-1.5 rounded-sm border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground disabled:opacity-50"
-                  >
-                    <Trash2 className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
-                    {deleting === account.name ? "removing…" : "remove"}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+          {/* Personal sessions */}
+          <section className="mt-6">
+            <div className="flex items-center gap-2 border-b border-border pb-2">
+              <KeyRound className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.75} aria-hidden="true" />
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">My sessions</h3>
+              <span className="ml-auto text-xs text-muted-foreground">{mine.length}</span>
+            </div>
+            {mine.length === 0 ? (
+              <p className="py-6 text-center text-xs text-muted-foreground">
+                No personal sessions yet. Add one to log into Facebook from here — the resulting cookies unlock the
+                full feed for your scrapes only.
+              </p>
+            ) : (
+              <ul className="divide-y divide-border">{mine.map(renderRow)}</ul>
+            )}
+          </section>
         </CardContent>
       </Card>
+
+      <Dialog
+        open={addOpen}
+        onClose={() => void (waiting ? handleCancelCapture() : closeAdd())}
+        title={addScope === "ops" ? "Add shared Facebook session" : "Add my Facebook session"}
+        description={
+          capture
+            ? "A one-time login browser is ready — open it to see the live Facebook page and sign in there."
+            : "You'll sign in to Facebook in a new tab on the live page (solving any CAPTCHA there) — only the resulting session cookies are stored with your account, never the password."
+        }
+        size="lg"
+      >
+        {!capture ? (
+          <div className="space-y-4">
+            <DialogSection>
+              <div className="space-y-1.5">
+                <label htmlFor="add-name" className="text-sm font-medium">
+                  Session name
+                </label>
+                <Input
+                  id="add-name"
+                  value={addName}
+                  onChange={(event) => setAddName(event.target.value)}
+                  placeholder={addScope === "ops" ? "e.g. shared-prod" : "e.g. personal-a"}
+                  required
+                  autoFocus
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Opens Facebook&lsquo;s live login page in a one-time browser hosted by this app — the page and your
+                clicks stream through the app&lsquo;s own connection, so it works from any device with no extra ports.
+                You complete the sign-in; this app only captures the session cookie.
+              </p>
+              {addError ? (
+                <p className="rounded-sm border border-red-700/40 bg-red-700/10 px-3 py-2 text-xs text-red-700">
+                  {addError}
+                </p>
+              ) : null}
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="outline" onClick={() => void closeAdd()}>
+                  Cancel
+                </Button>
+                <Button type="button" onClick={() => void handleStartCapture()} disabled={adding || !addName.trim()}>
+                  {adding ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+                  {adding ? "Starting browser…" : "Open Facebook login"}
+                </Button>
+              </div>
+            </DialogSection>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <DialogSection>
+              <div className="rounded-sm border border-border bg-muted/30 px-3 py-2.5">
+                <p className="flex items-center gap-2 text-sm font-medium">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  Waiting for you to sign in…
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Sign in on the live page in the login tab. The session arrives automatically once you finish (up to
+                  ~4 minutes). Keep this window open. If the login tab looks blank, make sure pop-ups are allowed and
+                  open it again.
+                </p>
+              </div>
+              {addError ? (
+                <p className="rounded-sm border border-red-700/40 bg-red-700/10 px-3 py-2 text-xs text-red-700">
+                  {addError}
+                </p>
+              ) : null}
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="outline" onClick={() => void handleCancelCapture()}>
+                  Cancel capture
+                </Button>
+                <Button type="button" onClick={openLoginTab}>
+                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                  Open login tab
+                </Button>
+              </div>
+            </DialogSection>
+          </div>
+        )}
+      </Dialog>
     </div>
   );
 }

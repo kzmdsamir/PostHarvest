@@ -5,17 +5,20 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Moon, Sun } from "lucide-react";
 import { AppSidebar } from "@/components/app-sidebar";
+import { SignInScreen } from "@/components/sign-in-screen";
+import { useAuth } from "@/lib/auth-context";
 import { useTheme } from "@/components/theme-provider";
 import { cn } from "@/lib/utils";
 
 /**
- * White topbar — flat Jost nav split between Home / Investigation / History:
- * bg-white, border-b neutral-200, links font-sans font-medium text-[11px]
- * uppercase tracking-[0.2em] text-neutral-500 hover:text-black.
+ * White topbar — flat Jost nav split between Home / Investigation / Pricing /
+ * History: bg-white, border-b neutral-200, links font-sans font-medium
+ * text-[11px] uppercase tracking-[0.2em] text-neutral-500 hover:text-black.
  */
 function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const pathname = usePathname();
   const { theme, toggleTheme } = useTheme();
+  const { user, loading } = useAuth();
 
   const link = cn(
     "font-sans font-medium text-[11px] uppercase tracking-[0.2em] text-neutral-500 transition-colors hover:cursor-pointer hover:text-black"
@@ -24,11 +27,12 @@ function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const navItems = [
     { href: "/", label: "Home" },
     { href: "/investigation", label: "Investigation" },
+    { href: "/pricing", label: "Pricing" },
     { href: "/history", label: "History" },
   ] as const;
 
   return (
-    <header className="flex h-16 flex-shrink-0 items-center justify-between border-b border-neutral-200 bg-white px-4 sm:px-8">
+    <header className="flex h-16 shrink-0 items-center justify-between border-b border-neutral-200 bg-white px-4 sm:px-8">
       <div className="flex items-center gap-6">
         <button
           type="button"
@@ -53,10 +57,14 @@ function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
       </div>
 
       <div className="flex items-center gap-5">
-        <span className="hidden items-center gap-2 font-sans font-medium text-[11px] uppercase tracking-[0.2em] text-neutral-500 sm:flex">
-          <span className="h-1.5 w-1.5 rounded-full bg-red-700 animate-pulse-dot" aria-hidden="true" />
-          api :8000
-        </span>
+        {!loading && !user ? (
+          <Link
+            href="/login"
+            className="flex items-center rounded-none bg-black px-4 py-1.5 font-sans font-medium text-[11px] uppercase tracking-[0.2em] text-white transition-colors hover:bg-neutral-700"
+          >
+            Sign In
+          </Link>
+        ) : null}
         <button
           type="button"
           onClick={toggleTheme}
@@ -80,6 +88,7 @@ function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
  */
 export default function AppShellLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { user, loading } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -92,9 +101,24 @@ export default function AppShellLayout({ children }: { children: React.ReactNode
     setMenuOpen(false);
   }, [pathname]);
 
+  // Login gate: the landing home and the docs are public; every other route in
+  // the app shell requires a Firebase session. While Firebase restores its
+  // session we show a splash so the shell doesn't flash signed-out.
+  const isPublicRoute = pathname === "/" || pathname === "/docs" || pathname.startsWith("/docs/");
+  if (loading) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-zinc-950">
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-neutral-700 border-t-white" />
+      </div>
+    );
+  }
+  if (!user && !isPublicRoute) {
+    return <SignInScreen />;
+  }
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-black font-sans text-black antialiased">
-      <aside className="hidden flex-shrink-0 lg:block">
+      <aside className="hidden shrink-0 lg:block">
         <AppSidebar />
       </aside>
 

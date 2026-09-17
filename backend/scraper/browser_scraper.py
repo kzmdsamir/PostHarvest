@@ -7,24 +7,29 @@ Supports authenticated scraping via saved cookies (from cli.py login).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 import re
+import secrets
+import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-import hashlib
 
 from bs4 import BeautifulSoup
 from backend.scraper.parser import find_post_roots
 
 logger = logging.getLogger("scraper.browser")
 
-COOKIES_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "fb_cookies.json"
-CREDENTIALS_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "fb_credentials.json"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+COOKIES_PATH = DATA_DIR / "fb_cookies.json"
+CREDENTIALS_PATH = DATA_DIR / "fb_credentials.json"
 
 MAX_SCROLL_ROUNDS = 40
 SCROLL_DELAY = 1.5
@@ -38,59 +43,349 @@ def _has_browser() -> bool:
         return False
 
 
-def save_cookies(cookies: list, account_name: str | None = None) -> None:
-    """Persist browser cookies to disk.
+def _base_data_dir() -> Path:
+    """The runtime data dir — resolved from settings so DATA_DIR env is honored.
 
-    If ``account_name`` is given, saves to ``data/fb_cookies_<account_name>.json``
-    and also updates the credentials index file.
+    (Path resolution happens at call time, not import time, so tests and
+    deployments that override DATA_DIR get the right store.)
     """
-    data_dir = Path(__file__).resolve().parent.parent.parent / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
+    from backend.core.config import get_settings
 
-    if account_name:
-        path = data_dir / f"fb_cookies_{account_name}.json"
-    else:
-        path = COOKIES_PATH
+    return Path(get_settings().data_dir)
+
+
+# ---------------------------------------------------------------------------
+# Owner/scope-aware cookie store
+#
+# Two tiers (locked decision, 2026-09-17):
+# * ops pool  — global store under ``data/`` (unchanged layout); owner_id=None
+# * personal  — per-user store under ``data/personal/{owner_id}/``; cookies are
+#   encrypted at rest when ``cookie_encryption_key`` is configured.
+# ---------------------------------------------------------------------------
+
+
+def _cipher():
+    """Return a Fernet cipher for personal at-rest encryption, or None."""
+    from backend.core.config import get_settings
+
+    key = get_settings().cookie_encryption_key
+    if not key:
+        return None
+    try:
+        from cryptography.fernet import Fernet
+        return Fernet(key if isinstance(key, bytes) else key.encode("utf-8"))
+    except Exception:  # pragma: no cover - misconfigured key
+        logger.warning(
+            "cookie_encryption_key is set but Fernet is unavailable; "
+            "personal cookies will be stored in plain JSON"
+        )
+        return None
+
+
+def _personal_dir(owner_id: int | None) -> Path:
+    """Per-user cookie store directory for the given owner id."""
+    if owner_id is None:
+        raise ValueError("owner_id is required for the personal cookie store")
+    return _base_data_dir() / "personal" / str(owner_id)
+
+
+def _credentials_path(owner_id: int | None = None) -> Path:
+    """Path to the credentials index for a scope (ops when owner_id is None)."""
+    if owner_id is None:
+        return _base_data_dir() / "fb_credentials.json"
+    return _personal_dir(owner_id) / "fb_credentials.json"
+
+
+def _cookies_path(account_name: str | None, owner_id: int | None = None) -> Path:
+    """Resolve the cookies file path for an account within a scope."""
+    base = _base_data_dir()
+    if owner_id is not None:
+        return _personal_dir(owner_id) / (
+            f"fb_cookies_{account_name}.json" if account_name else "fb_cookies.json"
+        )
+    if account_name and account_name != "default":
+        return base / f"fb_cookies_{account_name}.json"
+    return base / "fb_cookies.json"
+
+
+def _mirror_save(payload_text: str, account_name: str | None, owner_id: int | None) -> None:
+    """Upsert the ``saved_accounts`` mirror row (best-effort).
+
+    Disk files remain authoritative — a DB failure must never block or fail
+    the save, so any exception is logged and swallowed.
+    """
+    try:
+        from backend.core.database import get_session_context
+        from backend.models.saved_account import SavedAccount
+
+        scope = "me" if owner_id is not None else "ops"
+        name = (account_name or "default").strip() or "default"
+        now = datetime.now(timezone.utc)
+        with get_session_context() as db:
+            row = (
+                db.query(SavedAccount)
+                .filter_by(scope=scope, owner_id=owner_id, name=name)
+                .first()
+            )
+            if row is None:
+                db.add(
+                    SavedAccount(
+                        scope=scope,
+                        owner_id=owner_id,
+                        name=name,
+                        cookies=payload_text,
+                        meta={"saved_at": now.isoformat()},
+                    )
+                )
+            else:
+                row.cookies = payload_text
+                row.meta = {**(row.meta or {}), "saved_at": now.isoformat()}
+                row.updated_at = now
+    except Exception as exc:  # noqa: BLE001 - mirror is best-effort
+        logger.warning(
+            "saved_accounts mirror upsert failed (%s/%s): %s",
+            "me" if owner_id is not None else "ops",
+            account_name or "default",
+            exc,
+        )
+
+
+def _load_from_db(account_name: str | None, owner_id: int | None) -> Optional[list]:
+    """Fallback read of a jar from the saved_accounts mirror table.
+
+    Used when the on-disk file is missing (e.g. a restore onto a fresh host
+    that has the mirror but not the files). Returns None when there is no row
+    or the payload cannot be parsed/decrypted.
+    """
+    try:
+        from backend.core.database import get_session_context
+        from backend.models.saved_account import SavedAccount
+
+        scope = "me" if owner_id is not None else "ops"
+        name = (account_name or "default").strip() or "default"
+        with get_session_context() as db:
+            row = (
+                db.query(SavedAccount)
+                .filter_by(scope=scope, owner_id=owner_id, name=name)
+                .first()
+            )
+            if row is None:
+                return None
+            raw = row.cookies
+    except Exception as exc:  # noqa: BLE001 - best-effort fallback
+        logger.warning("saved_accounts mirror read failed: %s", exc)
+        return None
+
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict) and data.get("__encrypted__"):
+            cipher = _cipher()
+            if cipher is None:
+                logger.error(
+                    "Mirror row is encrypted but no cookie_encryption_key is "
+                    "configured; cannot load %s/%s",
+                    "me" if owner_id is not None else "ops",
+                    account_name or "default",
+                )
+                return None
+            data = json.loads(cipher.decrypt(data["payload"].encode("ascii")).decode("utf-8"))
+        if data:
+            logger.info("Loaded %d cookies from saved_accounts mirror", len(data))
+        return data if data else None
+    except Exception:
+        return None
+
+
+def _mirror_delete(account_name: str, owner_id: int | None) -> None:
+    """Remove the saved_accounts mirror row (best-effort)."""
+    try:
+        from backend.core.database import get_session_context
+        from backend.models.saved_account import SavedAccount
+
+        scope = "me" if owner_id is not None else "ops"
+        name = (account_name or "").strip() or "default"
+        with get_session_context() as db:
+            (
+                db.query(SavedAccount)
+                .filter_by(scope=scope, owner_id=owner_id, name=name)
+                .delete()
+            )
+    except Exception as exc:  # noqa: BLE001 - best-effort
+        logger.warning("saved_accounts mirror delete failed: %s", exc)
+
+
+def _db_extra_metadata(owner_id: int | None, disk_names: set[str]) -> list[dict]:
+    """Mirror-only rows (e.g. boot-imported jars whose files are gone).
+
+    Returns metadata for saved_accounts rows that have no on-disk counterpart
+    so a restored host still lists its sessions. Never cookie contents.
+    """
+    try:
+        from backend.core.database import get_session_context
+        from backend.models.saved_account import SavedAccount
+
+        scope = "me" if owner_id is not None else "ops"
+        with get_session_context() as db:
+            rows = db.query(SavedAccount).filter_by(scope=scope, owner_id=owner_id).all()
+    except Exception as exc:  # noqa: BLE001 - best-effort
+        logger.warning("saved_accounts metadata scan failed: %s", exc)
+        return []
+
+    extra = []
+    for row in rows:
+        if row.name in disk_names:
+            continue
+        saved_at = None
+        if isinstance(row.meta, dict):
+            saved_at = row.meta.get("saved_at")
+        extra.append(
+            {
+                "name": row.name,
+                "cookies_file": None,
+                "saved_at": saved_at,
+                "scope": scope,
+            }
+        )
+    return extra
+
+
+def parse_account_spec(spec: str | None) -> tuple[str, str | None]:
+    """Split a user-supplied account reference into ``(scope, name)``.
+
+    Accepted forms:
+        ``"ops:<name>"`` / ``"me:<name>"``  -> explicit scope
+        ``"<name>"``                        -> ops pool (backwards compatible)
+
+    The empty string / None resolves to the ops ``default`` session.
+    """
+    if not spec:
+        return "ops", None
+    if ":" in spec:
+        possible_scope, _, rest = spec.partition(":")
+        if possible_scope in ("ops", "me") and rest:
+            return possible_scope, rest.strip() or None
+    return "ops", spec.strip() or None
+
+
+def _serialize_payload(cookies: list, owner_id: int | None) -> Any:
+    """Serialize a jar the same way it is written to disk.
+
+    Personal jars are Fernet-encrypted at rest when a cookie_encryption_key is
+    configured (mirroring the file format); ops-pool jars stay plain.
+    """
+    payload: Any = cookies
+    cipher = _cipher() if owner_id is not None else None
+    if cipher is not None:
+        raw = json.dumps(cookies, ensure_ascii=False).encode("utf-8")
+        payload = {"__encrypted__": True, "payload": cipher.encrypt(raw).decode("ascii")}
+    return payload
+
+
+def save_cookies(
+    cookies: list,
+    account_name: str | None = None,
+    owner_id: int | None = None,
+) -> None:
+    """Persist browser cookies to disk for a scope.
+
+    ``owner_id=None`` targets the global ops store; otherwise cookies are
+    saved under ``data/personal/{owner_id}/`` and encrypted at rest when a
+    ``cookie_encryption_key`` is configured. The jar is then mirrored into the
+    ``saved_accounts`` table (disk stays authoritative; mirror failures only
+    log a warning).
+    """
+    data_dir = _base_data_dir() if owner_id is None else _personal_dir(owner_id)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    path = _cookies_path(account_name, owner_id)
+
+    payload = _serialize_payload(cookies, owner_id)
 
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(cookies, f, indent=2, ensure_ascii=False)
-    logger.info("Saved %d cookies to %s", len(cookies), path)
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    logger.info(
+        "Saved %d cookies to %s (owner_id=%s)", len(cookies), path, owner_id
+    )
 
-    # Update credentials index
     if account_name:
-        _update_credentials_index(account_name, path)
+        _update_credentials_index(account_name, path, owner_id=owner_id)
+
+    _mirror_save(json.dumps(payload, ensure_ascii=False), account_name, owner_id)
 
 
-def _update_credentials_index(account_name: str, cookies_path: Path) -> None:
-    """Add/update an account in the credentials index."""
-    index = load_credentials()
+def _update_credentials_index(
+    account_name: str,
+    cookies_path: Path,
+    owner_id: int | None = None,
+) -> None:
+    """Add/update an account in the credentials index for a scope."""
+    index = load_credentials(owner_id)
     index[account_name] = {
         "cookies_file": str(cookies_path.name),
         "saved_at": datetime.now(timezone.utc).isoformat(),
+        "encrypted": owner_id is not None and _cipher() is not None,
     }
-    CREDENTIALS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(CREDENTIALS_PATH, "w", encoding="utf-8") as f:
+    index_path = _credentials_path(owner_id)
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(index_path, "w", encoding="utf-8") as f:
         json.dump(index, f, indent=2, ensure_ascii=False)
-    logger.info("Updated credentials index: %s", account_name)
+    logger.info("Updated credentials index: %s (owner_id=%s)", account_name, owner_id)
 
 
-def load_credentials() -> dict:
-    """Load the credentials index: {account_name: {cookies_file, saved_at}}."""
-    if not CREDENTIALS_PATH.exists():
+def load_credentials(owner_id: int | None = None) -> dict:
+    """Load the credentials index for a scope.
+
+    Returns ``{account_name: {cookies_file, saved_at}}`` (ops scope) or the
+    per-user index (personal scope).
+    """
+    path = _credentials_path(owner_id)
+    if not path.exists():
         return {}
     try:
-        with open(CREDENTIALS_PATH, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return {}
 
 
-def list_accounts() -> list[str]:
-    """Return names of all saved Facebook accounts."""
-    return list(load_credentials().keys())
+def account_metadata(owner_id: int | None = None) -> list[dict]:
+    """Metadata for all saved accounts in a scope (never cookie contents).
+
+    Each item: ``{name, cookies_file, saved_at, scope}``. The implicit ops
+    ``default`` session (plain ``fb_cookies.json`` without an index entry)
+    is folded in for the ops scope.
+    """
+    creds = load_credentials(owner_id)
+    scope = "me" if owner_id is not None else "ops"
+    items = [
+        {
+            "name": name,
+            "cookies_file": entry.get("cookies_file") if isinstance(entry, dict) else None,
+            "saved_at": entry.get("saved_at") if isinstance(entry, dict) else None,
+            "scope": scope,
+        }
+        for name, entry in creds.items()
+    ]
+    if owner_id is None and (_base_data_dir() / "fb_cookies.json").exists() and "default" not in creds:
+        items.append(
+            {
+                "name": "default",
+                "cookies_file": "fb_cookies.json",
+                "saved_at": None,
+                "scope": "ops",
+            }
+        )
+    # Fold in mirror-only rows (boot-imported jars that have no disk file yet).
+    items.extend(_db_extra_metadata(owner_id, {item["name"] for item in items}))
+    items.sort(key=lambda item: item["name"])
+    return items
 
 
-def get_cookie_status(account_name: str | None = None) -> str:
+def list_accounts(owner_id: int | None = None) -> list[str]:
+    """Return names of all saved accounts in a scope."""
+    return [item["name"] for item in account_metadata(owner_id)]
+
+
+def get_cookie_status(account_name: str | None = None, owner_id: int | None = None) -> str:
     """Return ``"VALID"`` or ``"EXPIRED"`` for the given account's cookies.
 
     Checks the ``xs`` (session) cookie expiry against the current time.
@@ -99,7 +394,7 @@ def get_cookie_status(account_name: str | None = None) -> str:
     """
     import time as _time
 
-    cookies = load_cookies(account_name)
+    cookies = load_cookies(account_name, owner_id=owner_id)
     if not cookies:
         return "EXPIRED"
     now = _time.time()
@@ -112,38 +407,180 @@ def get_cookie_status(account_name: str | None = None) -> str:
     return "VALID"
 
 
-def load_cookies(account_name: str | None = None) -> Optional[list]:
-    """Load saved cookies from disk, or None if not found.
+def load_cookies(account_name: str | None = None, owner_id: int | None = None) -> Optional[list]:
+    """Load saved cookies for an account within a scope, or None if missing.
 
-    If ``account_name`` is given, loads that specific account's cookies.
-    Otherwise loads the default cookies file.
+    ``owner_id=None`` reads the global ops store; otherwise the per-user
+    store (transparently decrypting at-rest encrypted files).
     """
-    if account_name:
+    if owner_id is not None:
+        creds = load_credentials(owner_id)
+        if account_name:
+            if account_name not in creds:
+                if account_name != "default":
+                    logger.warning(
+                        "Account '%s' not found in personal credentials (owner_id=%s)",
+                        account_name, owner_id,
+                    )
+                    return None
+                path = _personal_dir(owner_id) / "fb_cookies.json"
+            else:
+                path = _personal_dir(owner_id) / creds[account_name]["cookies_file"]
+        else:
+            path = _personal_dir(owner_id) / "fb_cookies.json"
+    elif account_name:
         creds = load_credentials()
         if account_name not in creds:
             # A login without --account is stored under the plain default
             # file rather than the credentials index; fall back to it so
             # account_name="default" still unlocks the session.
             if account_name == "default":
-                path = COOKIES_PATH
+                path = _base_data_dir() / "fb_cookies.json"
             else:
                 logger.warning("Account '%s' not found in credentials", account_name)
                 return None
         else:
-            path = CREDENTIALS_PATH.parent / creds[account_name]["cookies_file"]
+            path = _base_data_dir() / creds[account_name]["cookies_file"]
     else:
-        path = COOKIES_PATH
+        path = _base_data_dir() / "fb_cookies.json"
 
     if not path.exists():
-        return None
+        return _load_from_db(account_name, owner_id)
     try:
         with open(path, "r", encoding="utf-8") as f:
-            cookies = json.load(f)
-        if cookies:
-            logger.info("Loaded %d cookies from %s", len(cookies), path)
-        return cookies if cookies else None
+            data = json.load(f)
+        if isinstance(data, dict) and data.get("__encrypted__"):
+            cipher = _cipher()
+            if cipher is None:
+                logger.error(
+                    "Personal cookies are encrypted but no cookie_encryption_key "
+                    "is configured; cannot load %s", path,
+                )
+                return None
+            raw = cipher.decrypt(data["payload"].encode("ascii"))
+            data = json.loads(raw.decode("utf-8"))
+        if data:
+            logger.info("Loaded %d cookies from %s", len(data), path)
+        return data if data else None
     except Exception:
         return None
+
+
+def delete_account(account_name: str, owner_id: int | None = None) -> bool:
+    """Remove an account's cookies file and index entry for a scope.
+
+    Returns True if anything was removed, False when the account is unknown.
+    """
+    name = (account_name or "").strip()
+    if not name:
+        return False
+
+    creds = load_credentials(owner_id)
+    if name in creds:
+        entry = creds[name]
+        cookies_file = entry.get("cookies_file") if isinstance(entry, dict) else None
+        base = _personal_dir(owner_id) if owner_id is not None else _base_data_dir()
+        if cookies_file:
+            (base / cookies_file).unlink(missing_ok=True)
+        del creds[name]
+        index_path = _credentials_path(owner_id)
+        if creds:
+            with open(index_path, "w", encoding="utf-8") as f:
+                json.dump(creds, f, indent=2, ensure_ascii=False)
+        else:
+            index_path.unlink(missing_ok=True)
+        _mirror_delete(name, owner_id)
+        return True
+
+    if name == "default":  # implicit default session (plain file, no index entry)
+        path = _cookies_path("default", owner_id)
+        if path.exists():
+            path.unlink(missing_ok=True)
+            _mirror_delete(name, owner_id)
+            return True
+    return False
+
+
+def import_cookie_files_to_db() -> int:
+    """Backfill the ``saved_accounts`` mirror from on-disk jars (one-time).
+
+    Called from ``init_db()`` at boot. Scans the ops store (``data/``), every
+    personal store (``data/personal/{owner_id}/``) and the credentials
+    indexes, inserting a mirror row per jar. No-op once the table has rows —
+    disk remains authoritative. Returns the number of rows inserted.
+    """
+    from backend.core.database import get_session_context
+    from backend.models.saved_account import SavedAccount
+
+    data_dir = _base_data_dir()
+    inserted = 0
+
+    def _insert(scope: str, owner_id: int | None, name: str, payload_text: str, saved_at=None) -> None:
+        nonlocal inserted
+        existing = (
+            db.query(SavedAccount)
+            .filter_by(scope=scope, owner_id=owner_id, name=name)
+            .first()
+        )
+        if existing is not None:
+            return
+        db.add(
+            SavedAccount(
+                scope=scope,
+                owner_id=owner_id,
+                name=name,
+                cookies=payload_text,
+                meta={"imported": True, "saved_at": saved_at},
+            )
+        )
+        inserted += 1
+
+    try:
+        with get_session_context() as db:
+            if db.query(SavedAccount).first() is not None:
+                return 0
+
+            # --- ops pool (data/) ---
+            creds = load_credentials()
+            for name, entry in creds.items():
+                fname = entry.get("cookies_file") if isinstance(entry, dict) else None
+                if fname and (data_dir / fname).exists():
+                    _insert(
+                        "ops", None, name,
+                        (data_dir / fname).read_text(encoding="utf-8"),
+                        entry.get("saved_at") if isinstance(entry, dict) else None,
+                    )
+            implicit = data_dir / "fb_cookies.json"
+            if implicit.exists() and "default" not in creds:
+                _insert("ops", None, "default", implicit.read_text(encoding="utf-8"))
+
+            # --- personal stores (data/personal/{owner_id}/) ---
+            personal_root = data_dir / "personal"
+            if personal_root.is_dir():
+                for owner_dir in sorted(personal_root.iterdir()):
+                    try:
+                        owner_id = int(owner_dir.name)
+                    except ValueError:
+                        continue
+                    ocreds = load_credentials(owner_id=owner_id)
+                    for name, entry in ocreds.items():
+                        fname = entry.get("cookies_file") if isinstance(entry, dict) else None
+                        if fname and (owner_dir / fname).exists():
+                            _insert(
+                                "me", owner_id, name,
+                                (owner_dir / fname).read_text(encoding="utf-8"),
+                                entry.get("saved_at") if isinstance(entry, dict) else None,
+                            )
+                    implicit_p = owner_dir / "fb_cookies.json"
+                    if implicit_p.exists() and "default" not in ocreds:
+                        _insert("me", owner_id, "default", implicit_p.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001 - import must never break boot
+        logger.warning("cookie file import skipped: %s", exc)
+        return inserted
+
+    if inserted:
+        logger.info("Mirrored %d on-disk cookie jar(s) into saved_accounts", inserted)
+    return inserted
 
 
 def login_with_browser(timeout_seconds: int = 120, account_name: str | None = None) -> bool:
@@ -207,6 +644,395 @@ def login_with_browser(timeout_seconds: int = 120, account_name: str | None = No
         return False
 
 
+def login_with_credentials(
+    email: str,
+    password: str,
+    owner_id: int | None = None,
+    account_name: str | None = None,
+    timeout_seconds: float | None = None,
+) -> bool:
+    """Headless Facebook login for personal cookies (server-side flow).
+
+    Fills the Facebook email/password form in a headless browser and waits
+    for the ``c_user`` session cookie to appear, then saves the captured
+    cookies under ``data/personal/{owner_id}/`` via :func:`save_cookies`.
+
+    The Facebook password is never persisted — only the resulting session
+    cookies (optionally encrypted at rest).
+
+    Returns True when a session was captured and saved, False otherwise
+    (login wall / checkpoint / timeout).
+    """
+    from backend.core.config import get_settings
+    from playwright.sync_api import sync_playwright
+
+    if not email or not password:
+        logger.warning("login_with_credentials called without credentials")
+        return False
+    if owner_id is None:
+        logger.warning(
+            "login_with_credentials requires owner_id; refusing to save "
+            "personal cookies to the global store"
+        )
+        return False
+
+    timeout_seconds = timeout_seconds or get_settings().personal_login_timeout_seconds
+    deadline = time.monotonic() + timeout_seconds
+    logged_in = False
+    session_cookies: list = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+            ],
+        )
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/128.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1280, "height": 900},
+            locale="en-US",
+        )
+        page = context.new_page()
+        try:
+            page.goto(
+                "https://m.facebook.com/login/",
+                wait_until="domcontentloaded",
+                timeout=30000,
+            )
+            # m.facebook renders a lightweight form; fall back to the main
+            # site selectors if the login form is missing.
+            if not page.query_selector('input[name="email"]'):
+                page.goto(
+                    "https://www.facebook.com/login/",
+                    wait_until="domcontentloaded",
+                    timeout=30000,
+                )
+            page.fill('input[name="email"]', email)
+            page.fill('input[name="pass"]', password)
+            page.click('button[name="login"]')
+            # Let the redirect settle before polling for the session cookie.
+            page.wait_for_timeout(2500)
+
+            while time.monotonic() < deadline:
+                cookies = context.cookies()
+                fb_cookies = [c for c in cookies if "facebook.com" in c.get("domain", "")]
+                if any(c["name"] == "c_user" for c in fb_cookies):
+                    logged_in = True
+                    session_cookies = cookies
+                    break
+                time.sleep(2)
+        except Exception as exc:  # noqa: BLE001 - surfaces as login failure
+            logger.warning("Headless Facebook login raised: %s", exc)
+        finally:
+            browser.close()
+
+    if logged_in and session_cookies:
+        save_cookies(session_cookies, account_name=account_name, owner_id=owner_id)
+        fb_cookies = [c for c in session_cookies if "facebook.com" in c.get("domain", "")]
+        logger.info(
+            "Personal login successful (owner_id=%s account=%s): %d FB cookies",
+            owner_id, account_name or "default", len(fb_cookies),
+        )
+        return True
+
+    logger.warning(
+        "Personal login failed (owner_id=%s account=%s): no c_user session within %.0fs",
+        owner_id, account_name or "default", timeout_seconds,
+    )
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Live session capture (remote-debug browser login)
+#
+# Facebook shows a CAPTCHA on almost every fresh login, so a server-side
+# credential login can't be automated. Instead the dashboard's "add session"
+# flow launches a throwaway Chromium with a remote-debugging (CDP) endpoint,
+# pre-navigates it to Facebook's login page, and returns a pipe link the user
+# opens in their own browser tab (Chrome's DevTools frontend). The user signs
+# in / solves the CAPTCHA live; this module polls for the ``c_user`` + ``xs``
+# session cookies, saves the jar (disk + mirror), then tears the browser down.
+#
+# CDP is bound to loopback inside the container and never published. The API
+# exposes a same-origin, capture_id-gated proxy (/api/accounts/capture/{id}/...)
+# so the flow works from any device without ever opening a port. The profile is
+# ephemeral and the browser is killed on success, cancel or timeout.
+# ---------------------------------------------------------------------------
+
+# Locked decision 2026-09-17: one published host port (SESSION_CAPTURE_PORT)
+# means one capture at a time app-wide; concurrent requests get a 409.
+_CAPTURES: dict[str, dict] = {}
+_CAPTURES_LOCK = threading.Lock()
+
+_DESKTOP_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/128.0.0.0 Safari/537.36"
+)
+
+
+class CaptureAlreadyActive(Exception):
+    """A capture for the same scope/owner is already running."""
+
+
+class CaptureStartFailed(Exception):
+    """The capture browser could not be started."""
+
+
+def _record_set(record: dict, **fields) -> None:
+    with _CAPTURES_LOCK:
+        for key, value in fields.items():
+            record[key] = value
+
+
+def start_session_capture(
+    *,
+    owner_id: int | None,
+    account_name: str | None = None,
+    scope: str = "me",
+    timeout_seconds: float | None = None,
+) -> dict:
+    """Launch a live session-capture browser and wait for it to come up.
+
+    Launches the worker in a daemon thread and blocks (bounded) until the
+    browser is up (or the start fails). The API endpoint composes the
+    same-origin DevTools viewer link from the request host afterwards.
+
+    Returns a dict with ``capture_id``, ``name``, ``scope`` and ``expires_at``.
+    Raises :class:`CaptureAlreadyActive` when a capture in the same scope is
+    already running, or :class:`CaptureStartFailed` on startup failure.
+    """
+    from backend.core.config import get_settings
+
+    scope = scope if scope in ("ops", "me") else "me"
+    timeout_seconds = timeout_seconds or get_settings().session_capture_timeout_seconds
+    key = "ops" if scope == "ops" else f"me:{owner_id}"
+
+    with _CAPTURES_LOCK:
+        existing = _CAPTURES.get(key)
+        if existing and not existing.get("finished"):
+            raise CaptureAlreadyActive()
+        capture_id = secrets.token_hex(8)
+        record = {
+            "id": capture_id,
+            "key": key,
+            "scope": scope,
+            "owner_id": owner_id,
+            "name": (account_name or "default").strip() or "default",
+            "finished": False,
+            "url": None,
+            "error": None,
+            "cancel": False,
+            "saved": False,
+            "deadline": time.monotonic() + timeout_seconds,
+        }
+        _CAPTURES[key] = record
+
+    threading.Thread(
+        target=_capture_worker,
+        args=(record, timeout_seconds),
+        daemon=True,
+    ).start()
+
+    # Wait (bounded) for the worker to signal the capture browser is ready.
+    wait_deadline = time.monotonic() + 20
+    while time.monotonic() < wait_deadline:
+        with _CAPTURES_LOCK:
+            if record.get("ready"):
+                return {
+                    "capture_id": capture_id,
+                    "name": record["name"],
+                    "scope": scope,
+                    "expires_at": (
+                        datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
+                    ).isoformat(),
+                }
+            if record.get("error"):
+                break
+        time.sleep(0.25)
+
+    with _CAPTURES_LOCK:
+        record["finished"] = True
+    raise CaptureStartFailed(record.get("error") or "capture browser failed to start")
+
+
+def cancel_session_capture(capture_id: str) -> bool:
+    """Request cancellation of a running capture (best-effort).
+
+    The worker notices the flag on its next poll, closes the browser and
+    cleans up. Returns True if a running capture was found and flagged.
+    """
+    with _CAPTURES_LOCK:
+        for record in _CAPTURES.values():
+            if record["id"] == capture_id and not record.get("finished"):
+                record["cancel"] = True
+                return True
+    return False
+
+
+def get_capture_record(capture_id: str) -> dict | None:
+    """Return the capture record with ``capture_id``, or None.
+
+    Used by the API's CDP proxy/bridge to gate access to an active capture.
+    """
+    with _CAPTURES_LOCK:
+        for record in _CAPTURES.values():
+            if record["id"] == capture_id:
+                return record
+    return None
+
+
+def _wait_for_cdp(base: str, deadline: float) -> bool:
+    """Poll until Chromium's CDP HTTP endpoint answers /json/version."""
+    import urllib.request
+
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(f"{base}/json/version", timeout=2) as r:
+                if r.status == 200:
+                    return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return False
+
+
+def _capture_ws_url(base: str) -> str | None:
+    """Find the login page target's ``webSocketDebuggerUrl`` via /json.
+
+    Prefers the Facebook page; falls back to the first page target.
+    """
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{base}/json", timeout=3) as r:
+            targets = json.loads(r.read().decode("utf-8"))
+    except Exception:
+        return None
+    for target in targets:
+        if target.get("type") == "page" and "facebook" in (target.get("url") or ""):
+            return target.get("webSocketDebuggerUrl")
+    for target in targets:
+        if target.get("type") == "page":
+            return target.get("webSocketDebuggerUrl")
+    return None
+
+
+def _capture_worker(record: dict, timeout_seconds: float) -> None:
+    """Run the capture browser in a background daemon thread."""
+    from backend.core.config import get_settings
+
+    settings = get_settings()
+    port = settings.session_capture_port
+    proc = None
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            executable = p.chromium.executable_path
+            profile = tempfile.mkdtemp(prefix="fb-capture-")
+            proc = subprocess.Popen(
+                [
+                    executable,
+                    f"--remote-debugging-port={port}",
+                    "--remote-debugging-address=127.0.0.1",
+                    f"--user-data-dir={profile}",
+                    "--no-sandbox",
+                    "--headless=new",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-dev-shm-usage",
+                    # The crashpad handler cannot start under the hardened
+                    # container (dropped caps) and its failure CHECK-crashes
+                    # Chromium at boot — disable crash reporting entirely.
+                    "--disable-crash-reporter",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "about:blank",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                # Chromium's crashpad needs a writable HOME; the non-root
+                # container user's HOME is not, which made the browser
+                # SIGTRAP-crash at boot. Set HOME into the throwaway profile.
+                env={
+                    **os.environ,
+                    "HOME": profile,
+                    "XDG_CONFIG_HOME": os.path.join(profile, ".config"),
+                },
+            )
+
+            cdp_base = f"http://127.0.0.1:{port}"
+            if not _wait_for_cdp(cdp_base, deadline=time.monotonic() + 15):
+                raise CaptureStartFailed("capture browser CDP endpoint did not come up")
+
+            browser = p.chromium.connect_over_cdp(cdp_base)
+            context = browser.contexts[0] if browser.contexts else browser.new_context(
+                user_agent=_DESKTOP_UA,
+                viewport={"width": 1280, "height": 900},
+                locale="en-US",
+            )
+            page = context.pages[0] if context.pages else context.new_page()
+            page.goto(
+                "https://www.facebook.com/login/",
+                wait_until="domcontentloaded",
+                timeout=45000,
+            )
+
+            ws_url = _capture_ws_url(cdp_base)
+            if not ws_url:
+                raise CaptureStartFailed("could not resolve the capture page WebSocket")
+            # Browser is up and reachable through the CDP proxy — publish
+            # readiness. The API endpoint composes the same-origin viewer link
+            # from the request host, so it works from any device without
+            # exposing the CDP port.
+            _record_set(record, ready=True)
+
+            # Poll for the two cookies that define a Facebook session (c_user +
+            # xs), giving the user time to log in and solve the CAPTCHA.
+            deadline = time.monotonic() + timeout_seconds
+            captured: list | None = None
+            while time.monotonic() < deadline:
+                if record.get("cancel"):
+                    break
+                cookies = context.cookies()
+                fb = [c for c in cookies if "facebook.com" in c.get("domain", "")]
+                if any(c["name"] == "c_user" for c in fb) and any(c["name"] == "xs" for c in fb):
+                    captured = cookies
+                    break
+                time.sleep(2)
+
+            if captured:
+                save_cookies(captured, account_name=record["name"], owner_id=record["owner_id"])
+                _record_set(record, saved=True)
+                logger.info(
+                    "Session capture complete (%s/%s, %d cookies)",
+                    record["scope"], record["name"], len(captured),
+                )
+            try:
+                browser.close()
+            except Exception:
+                pass
+            if proc.poll() is None:
+                proc.terminate()
+                proc.wait(timeout=10)
+    except Exception as exc:  # noqa: BLE001 - always surface in the record
+        logger.warning("Session capture failed: %s", exc)
+        _record_set(record, error=str(exc))
+    finally:
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        _record_set(record, finished=True)
+
+
 def fetch_with_browser(
     url: str,
     *,
@@ -215,11 +1041,16 @@ def fetch_with_browser(
     cancel_event: Optional[threading.Event] = None,
     use_cookies: bool = True,
     account_name: Optional[str] = None,
+    owner_id: Optional[int] = None,
     progress_callback: Optional[Callable[..., None]] = None,
 ) -> tuple:
     """Load a Facebook page in a headless browser, scroll to load posts,
     and return ``(html, stats)`` where *stats* is a dict with at least
-    ``login_wall`` (bool) and ``posts_found`` (int)."""
+    ``login_wall`` (bool) and ``posts_found`` (int).
+
+    ``owner_id`` selects the personal cookie store when given; ``None``
+    reads the global ops store.
+    """
     from playwright.sync_api import sync_playwright
 
     def _report(found: int) -> None:
@@ -252,10 +1083,13 @@ def fetch_with_browser(
 
         # Load saved cookies if available
         if use_cookies:
-            cookies = load_cookies(account_name=account_name)
+            cookies = load_cookies(account_name=account_name, owner_id=owner_id)
             if cookies:
                 context.add_cookies(cookies)
-                logger.info("Browser: loaded %d cookies (account=%s)", len(cookies), account_name or "default")
+                logger.info(
+                    "Browser: loaded %d cookies (account=%s owner_id=%s)",
+                    len(cookies), account_name or "default", owner_id,
+                )
 
         page = context.new_page()
 
@@ -301,7 +1135,7 @@ def fetch_with_browser(
             if login_check.get("isLoginPage") or login_check.get("hasLoginForm"):
                 login_wall_detected = True
                 logger.warning("Browser: hit login wall at %s", login_check.get("url"))
-                if not load_cookies(account_name=account_name):
+                if not load_cookies(account_name=account_name, owner_id=owner_id):
                     print("  WARNING: Hit Facebook login wall. Run 'python cli.py login' first.")
 
             # Page hub layout: click the "All" / "Posts" timeline tab so the
@@ -672,6 +1506,7 @@ def scrape_source_browser(
     max_posts: Optional[int] = None,
     scroll_rounds: Optional[int] = None,
     account_name: Optional[str] = None,
+    owner_id: Optional[int] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     post_type: Optional[str] = None,
@@ -686,6 +1521,10 @@ def scrape_source_browser(
     ``start_date`` / ``end_date`` / ``post_type`` filter the results exactly
     like the HTTP path (posts without a proven timestamp are skipped when a
     date range is given).
+
+    ``account_name`` + ``owner_id`` select which cookie scope to unlock:
+    ``owner_id=None`` reads the global ops pool; otherwise the account is
+    resolved from the owner's personal store.
     """
     from backend.scraper import ScrapeOptions, SourceResult, _handle_of, _passes_filters, validate_or_raise
     from backend.scraper.dedup import dedup_posts
@@ -737,6 +1576,7 @@ def scrape_source_browser(
             scroll_rounds=scroll_rounds if scroll_rounds is not None else MAX_SCROLL_ROUNDS,
             cancel_event=cancel_event,
             account_name=account_name,
+            owner_id=owner_id,
             use_cookies=use_cookies,
             progress_callback=progress_callback,
         )
@@ -755,10 +1595,10 @@ def scrape_source_browser(
 
     # Surface BUG-004 clearly: if we ended with a wall AND the saved
     # cookies are expired, tell the operator exactly what to do.
-    if wall_hit and account_name and get_cookie_status(account_name) == "EXPIRED":
+    if wall_hit and account_name and get_cookie_status(account_name, owner_id=owner_id) == "EXPIRED":
         logger.error(
-            "Account %s cookies EXPIRED. Run: python cli.py login --account %s",
-            account_name, account_name,
+            "Account %s cookies EXPIRED (owner_id=%s). Run: python cli.py login --account %s",
+            account_name, owner_id, account_name,
         )
 
     if not html:

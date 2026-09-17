@@ -15,8 +15,9 @@
 #   * Playwright launches Chromium with --no-sandbox (already in the code),
 #     which pair correctly with dropped caps.
 #
-# postgres needs no hardening here (already internal-network only); its
-# resource caps can be added if the host is small.
+# postgres was removed from the stack when the database moved to managed
+# Supabase (the backend connects over SUPABASE_DB_URL); nothing here needs
+# PostgreSQL hardening anymore.
 
 services:
   backend:
@@ -29,6 +30,13 @@ services:
       - ALL
     mem_limit: ${BACKEND_MEM_LIMIT:-1g}
     cpus: ${BACKEND_CPUS:-1.5}
+    # Schema owner: apply pending Alembic migrations against the configured DB
+    # before uvicorn boots (idempotent once the DB is stamped at head; the
+    # one-time `alembic stamp head` for the pre-migration Supabase database is
+    # documented in docs/DEPLOYMENT.md).
+    command: >
+      sh -c "alembic -c backend/alembic.ini upgrade head &&
+             exec uvicorn backend.main:app --host 0.0.0.0 --port 8000"
 
   frontend:
     read_only: true

@@ -1,4 +1,4 @@
 #!/bin/sh
-. "$(dirname -- "$0")/_/husky.sh"
-
-npx --no -- commitlint --edit ${1}
+# commitlint gate. Self-contained (no husky shim) so it survives the
+# husky v9 -> v10 transition unchanged.
+npx --no -- commitlint --edit "${1}"

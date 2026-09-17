@@ -44,6 +44,7 @@ browser_dump.html
 .env
 .env.*
 *.pem
+certs
 
 # --- Logs / runtime artifacts ----------------------------------------------
 nohup.out

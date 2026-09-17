@@ -4,10 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { BookOpen, ChevronDown, History, Home, KeyRound, Moon, ScanLine, Settings, Sun } from "lucide-react";
+import { BookOpen, ChevronDown, CreditCard, History, Home, KeyRound, ScanLine, Settings } from "lucide-react";
 import { DOCS_SECTIONS } from "@/lib/docs-meta";
 import { cn } from "@/lib/utils";
-import { useTheme } from "@/components/theme-provider";
 import { UserNav } from "@/components/UserNav";
 
 function NavLink({
@@ -124,7 +123,6 @@ function DocsDropdown({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { theme, toggleTheme } = useTheme();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -144,6 +142,7 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
       <nav className="flex-1 overflow-y-auto">
         <NavLink href="/" label="Home" icon={Home} onClick={goHome} />
         <NavLink href="/investigation" label="Investigation" icon={ScanLine} onClick={goInvestigation} />
+        <NavLink href="/pricing" label="Pricing" icon={CreditCard} onClick={onNavigate} />
         <NavLink href="/history" label="History" icon={History} onClick={onNavigate} />
         <NavLink href="/accounts" label="Saved accounts" icon={KeyRound} onClick={onNavigate} />
         <DocsDropdown onNavigate={onNavigate} />
@@ -151,28 +150,6 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <UserNav />
-
-      <div className="border-t border-neutral-800 px-4 py-3 space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="flex items-center gap-2 font-sans font-light text-[11px] uppercase tracking-[0.2em] text-neutral-500">
-            <span className="h-1.5 w-1.5 rounded-full bg-red-700 animate-pulse-dot" aria-hidden="true" />
-            api :8000
-          </span>
-          <button
-            type="button"
-            onClick={toggleTheme}
-            aria-label="Toggle theme"
-            className="flex h-7 w-7 items-center justify-center rounded-none border border-neutral-800 text-neutral-400 transition-colors hover:text-white"
-          >
-            {theme === "dark" ? (
-              <Sun className="h-3.5 w-3.5" strokeWidth={1.75} />
-            ) : (
-              <Moon className="h-3.5 w-3.5" strokeWidth={1.75} />
-            )}
-          </button>
-        </div>
-        <p className="font-sans font-light text-[10px] uppercase tracking-[0.2em] text-neutral-600 tabular-nums">v1.0.0</p>
-      </div>
     </aside>
   );
 }

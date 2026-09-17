@@ -59,7 +59,7 @@ const SCROLL_ROUND_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
 ];
 
 const FIELD_INPUT_CLASS =
-  "h-9 rounded-none border border-black bg-white font-sans text-sm tracking-normal text-black placeholder:text-neutral-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400";
+  "h-9 rounded-none border border-black bg-white font-sans text-sm tracking-normal text-black placeholder:text-neutral-400 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-neutral-400";
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return (
@@ -101,7 +101,7 @@ function ToggleGroup<T extends string>({
             disabled={disabled}
             aria-pressed={active}
             className={cn(
-              "-ml-px border px-3 py-1.5 font-sans text-xs font-medium normal-case transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-400 first:ml-0",
+              "-ml-px border px-3 py-1.5 font-sans text-xs font-medium normal-case transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-neutral-400 first:ml-0",
               index > 0 && "-ml-px",
               active
                 ? "border-black bg-black text-white"
@@ -143,13 +143,15 @@ export function UrlInputCard({
     if (saved.useBrowser) setUseBrowser(true);
   }, []);
 
-  // Load the saved sessions for the account dropdown.
+  // Load the saved sessions for the account dropdown (ops pool + my own).
   useEffect(() => {
     let cancelled = false;
     api
       .listAccounts()
       .then((res) => {
-        if (!cancelled) setAccounts(res.items);
+        if (!cancelled) {
+          setAccounts([...(res.ops ?? []), ...(res.mine ?? [])]);
+        }
       })
       .catch(() => {
         // Backend unreachable — dropdown just stays on "anonymous".
@@ -262,7 +264,7 @@ export function UrlInputCard({
           placeholder={"https://www.facebook.com/examplepage"}
           disabled={disabled}
           rows={4}
-          className="mt-2 w-full resize-y rounded-none border border-black bg-white p-4 font-mono text-sm tracking-normal text-black placeholder:text-neutral-400 focus:outline-none focus:ring-0"
+          className="mt-2 w-full resize-y rounded-none border border-black bg-white p-4 font-mono text-sm tracking-normal text-black placeholder:text-neutral-400 focus:outline-hidden focus:ring-0"
         />
         <p className="mt-2 font-mono text-[10px] uppercase tracking-widest text-neutral-400">
           Paste one Facebook public page or profile URL per line
@@ -419,15 +421,16 @@ export function UrlInputCard({
                 >
                   <option value="">Anonymous (no saved session)</option>
                   {accounts.map((entry) => (
-                    <option key={entry.name} value={entry.name}>
-                      {entry.name}
+                    <option key={`${entry.scope}:${entry.name}`} value={`${entry.scope}:${entry.name}`}>
+                      {entry.scope === "me" ? "me" : "ops"} / {entry.name}
                       {entry.saved_at ? ` · saved ${formatDateTime(entry.saved_at)}` : ""}
+                      {entry.status === "VALID" ? "" : " · expired"}
                     </option>
                   ))}
                 </Select>
                 <p className="mt-1.5 font-sans text-xs leading-relaxed text-neutral-500">
-                  Cookies unlock the full feed; anonymous sessions are capped by Facebook. Add more with {" "}
-                  <code className="font-mono">python cli.py login --account NAME</code>.
+                  Cookies unlock the full feed; anonymous sessions are capped by Facebook. Operators maintain the{" "}
+                  <code className="font-mono">ops</code> pool; add your own from Saved Sessions.
                 </p>
               </div>
               <div>

@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
-import { AlertTriangle, FileX2, MapPin, RefreshCcw } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, FileX2, Link2, MapPin, RefreshCcw } from "lucide-react";
 import { ApiErrorBanner } from "@/components/api-error-banner";
 import { Button } from "@/components/ui/button";
 import { safeHttpUrl, type ApiError } from "@/lib/api";
-import type { JobErrorDetail, JobProgress } from "@/lib/types";
+import type { JobErrorDetail, JobProgress, SourceProgress } from "@/lib/types";
 import { cn, formatNumber } from "@/lib/utils";
 
 export interface ProgressSectionProps {
@@ -15,14 +15,168 @@ export interface ProgressSectionProps {
   onRetry: () => void;
 }
 
-function computePercent(job: JobProgress): number | null {
-  if (job.pages_total != null && job.pages_total > 0 && job.pages_completed != null) {
-    return Math.max(0, Math.min(100, Math.round((job.pages_completed / job.pages_total) * 100)));
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, value));
+}
+
+/** Exported for tests; see decision log D13. */
+export function computePercent(job: JobProgress): number | null {
+  const pagesTotal = job.pages_total ?? 0;
+  const pagesDone = job.pages_completed ?? 0;
+  const postsFound = job.posts_found ?? 0;
+  const postsProcessed = job.posts_processed ?? 0;
+  const maxPosts = job.max_posts ?? 0;
+
+  if (job.status === "completed") return 100;
+
+  // Multi-source: page stepping is the authoritative signal; we have no
+  // per-source live counters, so stay coarse rather than blend aggregates.
+  if (pagesTotal > 1) {
+    return clampPercent(Math.round((pagesDone / pagesTotal) * 100));
   }
-  if (job.posts_found != null && job.posts_found > 0 && job.posts_processed != null) {
-    return Math.max(0, Math.min(100, Math.round((job.posts_processed / job.posts_found) * 100)));
+
+  if (job.status === "failed") {
+    if (postsFound > 0 && postsProcessed > 0) {
+      return clampPercent(Math.round((postsProcessed / postsFound) * 100));
+    }
+    return 0;
+  }
+
+  // Single source: live post counters give a smooth, truthful signal once the
+  // scraper starts streaming them (the fetcher processing loop or the browser
+  // post-parse phase). posts_extracted is an absolute cumulative counter, so
+  // processed/found is a genuine fraction of the work done.
+  if (pagesTotal === 1) {
+    if (pagesDone >= 1) return 100;
+    if (postsFound > 0 && postsProcessed > 0) {
+      return clampPercent(Math.round((postsProcessed / postsFound) * 100));
+    }
+    // Discovery heuristic: while the browser/HTTP fetcher is still finding
+    // posts (posts_processed is 0), posts_found/max_posts is the only live
+    // signal. This keeps the bar climbing during discovery instead of sticking
+    // on an indeterminate shimmer.
+    if (postsFound > 0 && maxPosts > 0) {
+      return clampPercent(Math.round((postsFound / maxPosts) * 100));
+    }
+    // Still discovering and no cap to compare against: show the indeterminate
+    // bar rather than a fake 0%.
+    return null;
+  }
+
+  if (postsFound > 0 && postsProcessed > 0) {
+    return clampPercent(Math.round((postsProcessed / postsFound) * 100));
   }
   return null;
+}
+
+/**
+ * Seconds the job has actively been running, free of paused time.
+ * Seeds from the server `started_at` once, then ticks forward only while the
+ * job status is "running" (so a paused job freezes its ETA, Q14-A).
+ */
+function useActiveSeconds(job: JobProgress | null): number {
+  const [activeSeconds, setActiveSeconds] = useState(0);
+  const stateRef = useRef<{
+    jobId: string | null;
+    activeMs: number;
+    lastTickTime: number;
+  }>({ jobId: null, activeMs: 0, lastTickTime: 0 });
+
+  useEffect(() => {
+    const s = stateRef.current;
+    const jobId = job?.job_id ?? null;
+    if (jobId === s.jobId) return;
+    s.jobId = jobId;
+    s.activeMs = 0;
+    setActiveSeconds(0);
+    if (job?.started_at) {
+      const t = Date.parse(job.started_at);
+      if (!Number.isNaN(t)) {
+        // Mid-run page load: approximate from the server start timestamp.
+        s.activeMs = Math.max(0, Date.now() - t);
+        setActiveSeconds(s.activeMs / 1000);
+      }
+    }
+  }, [job?.job_id, job?.started_at]);
+
+  useEffect(() => {
+    const s = stateRef.current;
+    if (job?.status !== "running" || s.jobId === null) {
+      s.lastTickTime = 0;
+      return;
+    }
+    s.lastTickTime = Date.now();
+    const id = setInterval(() => {
+      const now = Date.now();
+      s.activeMs += Math.max(0, now - s.lastTickTime);
+      s.lastTickTime = now;
+      setActiveSeconds(s.activeMs / 1000);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [job?.status, job?.job_id]);
+
+  return activeSeconds;
+}
+
+/** Exported for tests. Uses the posts_processed rate against the remaining
+ * count (posts_found - posts_processed). During pure discovery (nothing
+ * extracted yet) it falls back to posts_found vs max_posts so the ETA can
+ * exist whenever a percentage does. */
+export function computeEtaSeconds(activeSeconds: number, job: JobProgress): number | null {
+  if (activeSeconds <= 0) return null;
+  const postsFound = job.posts_found ?? 0;
+  const postsProcessed = job.posts_processed ?? 0;
+  const maxPosts = job.max_posts ?? 0;
+
+  if (postsFound > 0 && postsProcessed > 0) {
+    const rate = postsProcessed / activeSeconds;
+    const remaining = postsFound - postsProcessed;
+    if (rate <= 0 || remaining <= 0) return null;
+    return remaining / rate;
+  }
+  if (postsFound > 0 && maxPosts > 0) {
+    const rate = postsFound / activeSeconds;
+    const remaining = maxPosts - postsFound;
+    if (rate <= 0 || remaining <= 0) return null;
+    return remaining / rate;
+  }
+  return null;
+}
+
+/** Q7-A: render ETA as minutes and seconds (e.g. "3m 24s"). Exported for tests. */
+export function formatEta(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(total / 60);
+  const secs = total % 60;
+  if (minutes >= 60) return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  return `${minutes}m ${secs}s`;
+}
+
+const SOURCE_STATUS_STYLES: Record<string, string> = {
+  queued: "bg-neutral-300",
+  running: "bg-emerald-500 animate-pulse",
+  completed: "bg-black",
+  failed: "bg-red-600",
+  cancelled: "bg-neutral-400",
+};
+
+function SourceRow({ source }: { source: SourceProgress }) {
+  const dotClass = SOURCE_STATUS_STYLES[source.status] ?? "bg-neutral-300";
+  const label = source.status.length > 0 ? source.status.charAt(0).toUpperCase() + source.status.slice(1) : "Queued";
+  return (
+    <li className="flex items-center gap-2 py-0.5">
+      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotClass)} aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate font-sans font-light text-[11px] text-neutral-600" title={source.url}>
+        {source.url}
+      </span>
+      <span className="shrink-0 font-sans font-light text-[9px] uppercase tracking-[0.12em] text-neutral-400">
+        {label}
+      </span>
+      <span className="shrink-0 font-sans font-normal text-[10px] tabular-nums text-neutral-500">
+        {formatNumber(source.posts_processed)} / {formatNumber(source.posts_found)}
+      </span>
+    </li>
+  );
 }
 
 function ErrorListItem({ entry }: { entry: JobErrorDetail }) {
@@ -33,7 +187,7 @@ function ErrorListItem({ entry }: { entry: JobErrorDetail }) {
         <span className="border border-red-700/60 px-1.5 py-0.5 font-sans font-light text-[10px] uppercase tracking-[0.2em] text-red-700">
           {entry.code}
         </span>
-        <span className="min-w-0 flex-1 break-words font-sans text-sm text-neutral-700">{entry.message}</span>
+        <span className="min-w-0 flex-1 wrap-break-word font-sans text-sm text-neutral-700">{entry.message}</span>
       </div>
       {link ? (
         <p className="mt-1 truncate font-sans font-light text-[11px] text-neutral-500">
@@ -47,6 +201,14 @@ function ErrorListItem({ entry }: { entry: JobErrorDetail }) {
 
 export function ProgressSection({ active, job, error, onRetry }: ProgressSectionProps) {
   const percent = useMemo(() => (job ? computePercent(job) : null), [job]);
+  const activeSeconds = useActiveSeconds(job);
+  const etaSeconds = useMemo(() => {
+    if (!job || percent == null) return null;
+    if (job.status !== "running" && job.status !== "paused") return null;
+    // Q16-A: delay the ETA a few seconds so early rates don't produce noise.
+    if (activeSeconds < 5) return null;
+    return computeEtaSeconds(activeSeconds, job);
+  }, [job, percent, activeSeconds]);
   const showUnreachable = error !== null && job === null;
   const showConnectionLoss = error !== null && job !== null;
   const failed = job?.status === "failed";
@@ -66,6 +228,7 @@ export function ProgressSection({ active, job, error, onRetry }: ProgressSection
   }, [job]);
 
   const title = failed ? "Scraping failed" : queued ? "Job queued" : "Scraping in progress";
+  const sources = job?.sources ?? [];
 
   const bar = percent != null ? (
     <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label="Job progress" className="relative h-1 w-full overflow-hidden bg-neutral-100">
@@ -107,10 +270,16 @@ export function ProgressSection({ active, job, error, onRetry }: ProgressSection
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
-            {active && !showConnectionLoss ? (
+            {active && !showConnectionLoss && job?.status === "running" ? (
               <span className="flex items-center gap-1 font-sans font-light text-[9px] uppercase tracking-[0.15em] text-neutral-400">
                 <span className="h-1 w-1 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
                 live
+              </span>
+            ) : null}
+            {etaSeconds != null ? (
+              // Q13-A: ETA sits immediately to the left of the percentage.
+              <span className="font-sans font-normal text-[9px] text-neutral-500 tabular-nums" title="Estimated time remaining">
+                {formatEta(etaSeconds)}
               </span>
             ) : null}
             {percent != null ? (
@@ -124,6 +293,26 @@ export function ProgressSection({ active, job, error, onRetry }: ProgressSection
             )}
           </div>
         </div>
+
+        {sources.length > 0 ? (
+          // Q4-A / Q12-A: links box on top of the progress section, inline and scrollable.
+          <div className="border-b border-neutral-100 px-4 py-2" aria-label="Links being scraped">
+            <div className="mb-1 flex items-center gap-2">
+              <Link2 className="h-3 w-3 text-neutral-400" aria-hidden="true" />
+              <span className="font-sans font-light text-[9px] uppercase tracking-[0.2em] text-neutral-400">
+                Links being scraped
+              </span>
+              <span className="font-sans font-light text-[9px] uppercase tracking-[0.2em] text-neutral-300 tabular-nums">
+                ({formatNumber(sources.length)})
+              </span>
+            </div>
+            <ul className="max-h-20 space-y-0.5 overflow-y-auto pr-1">
+              {sources.map((source) => (
+                <SourceRow key={source.url} source={source} />
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         {stats.length > 0 ? (
           <div className="flex flex-wrap items-stretch divide-x divide-neutral-100">

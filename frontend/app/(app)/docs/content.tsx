@@ -144,7 +144,8 @@ npm run dev   # http://localhost:3000`}</Pre>
       </P>
       <H2>4. Export the results</H2>
       <P>
-        When the run completes, download the dataset. Use <Code>JSON</Code> for machine processing, <Code>CSV</Code>{" "}
+        When the run completes, download the dataset from the <Code>Export results</Code> card — the three buttons
+        stream the file live through your session. Use <Code>JSON</Code> for machine processing, <Code>CSV</Code>{" "}
         for spreadsheets, and <Code>Excel</Code> for a formatted workbook.
       </P>
       <H2>5. Enable browser mode (optional)</H2>
@@ -319,16 +320,25 @@ npm run dev   # http://localhost:3000`}</Pre>
       </P>
       <H2>Saving a session</H2>
       <P>
-        Log in once with your own account in a visible browser:
+        Two kinds of sessions exist. Operator-managed sessions are shared by every user and saved from the CLI:
       </P>
       <Pre>{`python cli.py login --account default`}</Pre>
       <P>
-        Cookies are stored in <Code>data/fb_cookies.json</Code> (or <Code>data/fb_cookies_&lt;name&gt;.json</Code> for
-        named accounts) and never uploaded anywhere. A credentials index keeps only metadata.
+        Your own personal sessions are added in the dashboard instead: <Code>Saved sessions → Add my session</Code>.
+        That starts a one-time login browser and hands you a link — you open it in a new tab and sign in to Facebook
+        there (solving any CAPTCHA yourself). The app only captures the resulting session cookie: the password is never
+        stored, and your plan caps how many sessions you can keep. Operators can also add sessions shared by everyone
+        with <Code>Add shared session</Code> (hidden for regular users).
+      </P>
+      <P>
+        Cookie files remain on disk under <Code>data/</Code> for the operator pool, or{" "}
+        <Code>data/personal/&#123;user&#125;/</Code> for personal sessions; an encrypted mirror row is kept in the
+        database as well, so a restored host still lists its sessions. A credentials index keeps only metadata.
       </P>
       <H2>Using sessions</H2>
       <ul className="list-disc space-y-1 pl-5">
-        <Li>Dashboard: enable Browser mode, type the account name into the <Code>Saved account</Code> field.</Li>
+        <Li>Dashboard: enable Browser mode and pick the session from the <Code>Saved account</Code> dropdown —{" "}
+          <Code>me/</Code> entries are your own sessions, <Code>ops/</Code> are operator-managed and shared.</Li>
         <Li>CLI: pass <Code>--account</Code>, or comma-separate several to rotate across URLs.</Li>
         <Li>
           List sessions with <Code>python cli.py accounts</Code>; review or remove them on the{" "}
@@ -342,8 +352,11 @@ npm run dev   # http://localhost:3000`}</Pre>
       </P>
       <H2>API</H2>
       <P>
-        <Code>GET /api/accounts</Code> returns session metadata, <Code>DELETE /api/accounts/&#123;name&#125;</Code> deletes a
-        session. Cookie contents are never exposed over the API.
+        <Code>GET /api/accounts</Code> returns session metadata split into the shared <Code>ops</Code> pool and your
+        <Code>me</Code> sessions; <Code>DELETE /api/accounts/&#123;scope&#125;/&#123;name&#125;</Code> removes one.
+        <Code>POST /api/accounts/capture</Code> starts the live login flow and returns the tab link ({" "}
+        <Code>ops</Code> scope requires the ops role); <Code>DELETE /api/accounts/capture/&#123;id&#125;</Code> aborts
+        it. Cookie contents are never exposed over the API.
       </P>
     </>
   ),
@@ -420,13 +433,15 @@ npm run dev   # http://localhost:3000`}</Pre>
       <H2>Requirements</H2>
       <P>
         Excel export needs <Code>openpyxl</Code>; CSV is stdlib-only. If <Code>openpyxl</Code> is missing the API
-        returns <Code>{"503 { \"A dependency is unavailable\" }"}</Code> for Excel and the dashboard hides that option.
+        returns <Code>{"503 { \"A dependency is unavailable\" }"}</Code> for Excel and the dashboard button reports the
+        error.
       </P>
       <H2>Streaming & limits</H2>
       <P>
         Exports are generated server-side and streamed as attachments. They are not capped at 2,000 rows the way the
         in-browser preview is, so use the export endpoints for large datasets. A running job returns{" "}
-        <Code>409</Code> until it finishes. Filenames look like <Code>facebook_posts.xlsx</Code>.
+        <Code>409</Code> until it finishes. The dashboard downloads are signed with your session and saved as{" "}
+        <Code>facebook_posts.json</Code>, <Code>facebook_posts.csv</Code> or <Code>facebook_posts.xlsx</Code>.
       </P>
       <H2>Pruning results: delete</H2>
       <P>
@@ -554,6 +569,11 @@ GET /api/jobs/{job_id}/export/excel`}</Pre>
           [<Code key="503">503</Code>, "Excel dependency (openpyxl) unavailable"],
         ]}
       />
+      <P>
+        Every export endpoint requires the same Firebase bearer token as the rest of the API. The dashboard&lsquo;s
+        Export card fetches the file with your session and saves it with the canonical filename — a plain browser
+        navigation to the URL without the token returns <Code>401</Code>.
+      </P>
       <H2>Accounts</H2>
       <Pre>{`GET /api/accounts
 → { "items": [ { "name": "default",

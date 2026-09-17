@@ -62,7 +62,7 @@ def _init_firebase() -> firebase_admin.App:
     # 3. Fallback to default application credentials if available
     try:
         cred = credentials.ApplicationDefault()
-        _app = firebase_admin.initialize_app(cred, {"projectId": settings.firebase_project_id or "postharvest-5a5bb"})
+        _app = firebase_admin.initialize_app(cred, {"projectId": settings.firebase_project_id or "postharvest-firebase"})
         logger.info("Firebase Admin initialized via Application Default Credentials")
         return _app
     except Exception as exc:

@@ -243,6 +243,61 @@ def start_scrape_job(db, request: ScrapeRequest, owner_id: int | None = None) ->
             f"Too many URLs: {len(request.urls)} (max {settings.max_urls_per_job})"
         )
 
+    # Tier limits (Basic / Pro / Enterprise) — enforced server-side, on top
+    # of the global hard caps above. Unauthenticated/CLI jobs pass through.
+    if owner_id is not None:
+        from backend.core.plans import plan_limits
+        from backend.models.user import User
+
+        user = db.get(User, owner_id)
+        if user is not None:
+            limits = plan_limits(user.plan)
+            if len(request.urls) > limits["urls"]:
+                raise AppError(
+                    f"Your {user.plan} plan allows up to {limits['urls']} "
+                    "URL(s) per job",
+                    status_code=429,
+                    code="plan_limit",
+                )
+            if (
+                request.max_posts is not None
+                and limits["max_posts"]
+                and request.max_posts > limits["max_posts"]
+            ):
+                raise AppError(
+                    f"Your {user.plan} plan allows up to {limits['max_posts']} "
+                    "posts per source",
+                    status_code=429,
+                    code="plan_limit",
+                )
+            running = db.scalar(
+                select(func.count())
+                .select_from(ScrapeJob)
+                .where(
+                    ScrapeJob.owner_id == owner_id,
+                    ScrapeJob.status.in_(("queued", "running")),
+                )
+            )
+            if running >= limits["concurrent_jobs"]:
+                raise AppError(
+                    f"Your {user.plan} plan allows {limits['concurrent_jobs']} "
+                    "concurrent job(s); wait for the current job to finish",
+                    status_code=429,
+                    code="plan_limit",
+                )
+            # `me:<name>` must exist in the caller's own store; `ops:*` and
+            # bare names pass through (ops sessions may be added later).
+            if request.account:
+                from backend.scraper.browser_scraper import load_cookies, parse_account_spec
+
+                scope, name = parse_account_spec(request.account)
+                if scope == "me" and name and not load_cookies(name, owner_id=owner_id):
+                    raise AppError(
+                        f"Personal account '{name}' not found",
+                        status_code=400,
+                        code="account_not_found",
+                    )
+
     valid, invalid = validate_and_collect_urls(request.urls)
     if not valid:
         details = "; ".join(
@@ -336,7 +391,10 @@ def _run_job_inner(job_id: str, token: CancelToken | None) -> None:
             return  # deleted or cancelled before the worker started
         job.status = "running"
         job.updated_at = _now()
+        if job.started_at is None:
+            job.started_at = _now()
         options_snapshot: dict = job.options or {}
+        owner_id: int | None = job.owner_id
         db.commit()
 
     with SessionLocal() as db:
@@ -355,7 +413,7 @@ def _run_job_inner(job_id: str, token: CancelToken | None) -> None:
         if token is not None and token.cancelled:
             _mark_source_cancelled(job_id, source_id)
             break
-        _process_source(job_id, source_id, options_snapshot, token)
+        _process_source(job_id, source_id, options_snapshot, token, owner_id=owner_id)
 
     _finalize(job_id, token)
 
@@ -388,8 +446,13 @@ def _process_source(
     source_id: int,
     options_snapshot: dict,
     token: CancelToken | None,
+    owner_id: int | None = None,
 ) -> None:
-    """Scrape one source, persist posts/errors, update job counters."""
+    """Scrape one source, persist posts/errors, update job counters.
+
+    ``owner_id`` is the job owner — used to resolve ``me:<name>`` personal
+    cookie accounts against that user's store at scrape time.
+    """
     scraper = _scraper_module()
 
     with SessionLocal() as db:
@@ -415,12 +478,23 @@ def _process_source(
 
     try:
         if options_snapshot.get("use_browser"):
-            from backend.scraper.browser_scraper import scrape_source_browser
+            from backend.scraper.browser_scraper import (
+                parse_account_spec,
+                scrape_source_browser,
+            )
+
+            scope, account_name = parse_account_spec(
+                options_snapshot.get("account") or None
+            )
+            # `me:<name>` resolves against the job owner's personal store;
+            # `ops:<name>` / bare names use the shared ops pool.
+            scrape_owner = owner_id if scope == "me" else None
             result = scrape_source_browser(
                 source_url,
                 max_posts=options_snapshot.get("max_posts"),
                 scroll_rounds=options_snapshot.get("scrolls") or None,
-                account_name=options_snapshot.get("account") or None,
+                account_name=account_name,
+                owner_id=scrape_owner,
                 start_date=options_snapshot.get("start_date"),
                 end_date=options_snapshot.get("end_date"),
                 post_type=options_snapshot.get("post_type"),
@@ -898,7 +972,9 @@ def _make_progress_callback(job_id: str, source_id: int) -> Callable:
             "posts_found": _int_or_none(
                 counters.get("posts_found", counters.get("posts_discovered"))
             ),
-            "posts_extracted": _int_or_none(counters.get("posts_extracted")),
+            "posts_extracted": _int_or_none(
+                counters.get("posts_extracted", counters.get("posts_processed"))
+            ),
             "duplicates_removed": _int_or_none(
                 counters.get("duplicates", counters.get("duplicates_removed"))
             ),

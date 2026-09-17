@@ -23,6 +23,7 @@ from backend.core.job_manager import JobManager
 from backend.models.errors import ScrapeError
 from backend.models.posts import Post
 from backend.models.scrape_jobs import ScrapeJob
+from backend.models.sources import ScrapeSource
 from backend.models.user import User
 from backend.schemas.jobs import (
     ErrorDetail,
@@ -32,6 +33,7 @@ from backend.schemas.jobs import (
     JobSummary,
     PostOut,
     PostPageResponse,
+    SourceStatus,
 )
 from backend.services import serialization, stats as stats_service
 
@@ -129,6 +131,22 @@ def get_job_status(
         )
         for e in error_rows
     ]
+    source_rows = db.scalars(
+        select(ScrapeSource)
+        .where(ScrapeSource.job_id == job_id)
+        .order_by(ScrapeSource.id)
+    ).all()
+    sources = [
+        SourceStatus(
+            url=s.normalized_url or s.url,
+            status=s.status,
+            posts_found=s.posts_discovered,
+            posts_processed=s.posts_extracted,
+            error_code=s.error_code,
+            error_message=s.error_message,
+        )
+        for s in source_rows
+    ]
     return JobStatusResponse(
         job_id=job.id,
         status=job.status if job.status in ("queued", "running", "completed", "failed") else "failed",
@@ -143,7 +161,10 @@ def get_job_status(
         posts_failed=job.posts_failed,
         cancel_requested=job.cancel_requested,
         created_at=serialization.iso_format(job.created_at),
+        started_at=serialization.iso_format(job.started_at),
         completed_at=serialization.iso_format(job.completed_at),
+        max_posts=job.options.get("max_posts") if job.options else None,
+        sources=sources,
     )
 
 

@@ -66,16 +66,26 @@ services:
       # Dockerfile lives inside docker/; COPY paths in it are root-relative.
       dockerfile: docker/Dockerfile
       target: backend
+      # Build over the host network: Docker's default bridge resolver returns
+      # only AAAA for some CDNs (e.g. cdn.playwright.dev) and this host has no
+      # IPv6, so `playwright install` fails with EAI_AGAIN. Build-time only —
+      # the running container keeps its normal isolated network.
+      network: host
     image: postharvest-backend:latest
     container_name: postharvest-backend
     init: true
+    # Live session-capture browser (remote-debug CDP). The CDP endpoint is
+    # bound to loopback INSIDE the container and deliberately NOT published:
+    # the API proxies the DevTools frontend and bridges the websocket
+    # (/api/accounts/capture/{id}/...), so one capture at a time app-wide and
+    # zero exposed ports.
     environment:
       DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/postharvest.db}
       SUPABASE_DB_URL: ${SUPABASE_DB_URL:-}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
       SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-}
-      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-postharvest-5a5bb}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-postharvest-firebase}
       FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL:-}
       FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY:-}
       DATA_DIR: ${DATA_DIR:-/app/data}
@@ -90,6 +100,13 @@ services:
       SCRAPER_MAX_RETRIES: ${SCRAPER_MAX_RETRIES:-3}
       SCRAPER_ROBOTS: ${SCRAPER_ROBOTS:-1}
       COOKIE_ENCRYPTION_KEY: ${COOKIE_ENCRYPTION_KEY:-}
+      # Comma-separated emails auto-promoted to the ops role on first login.
+      OPS_EMAILS: ${OPS_EMAILS:-}
+      # Max seconds a server-side personal Facebook login may run.
+      PERSONAL_LOGIN_TIMEOUT_SECONDS: ${PERSONAL_LOGIN_TIMEOUT_SECONDS:-90.0}
+      # Live session capture (loopback CDP; proxied same-origin by the API).
+      SESSION_CAPTURE_PORT: ${SESSION_CAPTURE_PORT:-9333}
+      SESSION_CAPTURE_TIMEOUT_SECONDS: ${SESSION_CAPTURE_TIMEOUT_SECONDS:-240.0}
     volumes:
       # Bind-mount the repo data/ dir so the CLI (host) and the container share
       # the same cookie store / exports. Keep the file layout identical to
@@ -126,7 +143,7 @@ services:
         NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://postharvest.space}
         NEXT_PUBLIC_FIREBASE_API_KEY: ${NEXT_PUBLIC_FIREBASE_API_KEY:-}
         NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:-}
-        NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${NEXT_PUBLIC_FIREBASE_PROJECT_ID:-postharvest-5a5bb}
+        NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${NEXT_PUBLIC_FIREBASE_PROJECT_ID:-postharvest-firebase}
         NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ${NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET:-}
         NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:-}
         NEXT_PUBLIC_FIREBASE_APP_ID: ${NEXT_PUBLIC_FIREBASE_APP_ID:-}
