@@ -62,10 +62,10 @@ Status snapshot: 2026-09-17. Legend: **✅** done to this stage · **⬜** pendi
 ## ⬜ Pending — roadmap phases (from [ROADMAP.md](./ROADMAP.md))
 
 ### Phase 2 — Core SaaS plumbing
-- [ ] **Firebase server-side verification on every `/api` route** — today only a bare `firebase_uid` field exists in `backend/api/auth.py`; no token verification, no Firebase in frontend app code (only `node_modules`)
-- [ ] **`owner_id` on every persisted row** — partial: present in schema + saved-accounts/exports/scrape paths; not audited across all models; backfill migration pending
-- [ ] **Frontend Firebase integration** (Google OAuth + email/password, shared auth provider, dashboard gating)
-- [ ] **Encrypted per-owner FB session storage** + owner-scoped accounts API (still plaintext shared pool `data/fb_cookies_*.json`)
+- [x] **Firebase server-side verification on every `/api` route** — `verify_id_token()` in `backend/auth/firebase.py`; `get_current_user` dependency on all protected routes; auto-provisions users on first login
+- [x] **`owner_id` / tenant ownership and cross-user isolation** — `scrape_jobs.owner_id` FK indexed; all queries filtered by `owner_id`; SQL-level DELETE ownership; Alembic migration covers full schema
+- [x] **Frontend Firebase integration** (Google OAuth + email/password, shared auth provider, dashboard gating) — `frontend/lib/firebase.ts`, `auth-context.tsx`, route gating in `(app)/layout.tsx`, Bearer token auto-injection in `api.ts`
+- [x] **Encrypted per-owner FB session storage** + owner-scoped accounts API — Fernet encryption via `COOKIE_ENCRYPTION_KEY`; personal sessions under `data/personal/{owner_id}/`; `SavedAccount` model with `owner_id`; owner-scoped API endpoints
 
 ### Phase 3 — Production topology
 - [ ] **Let's Encrypt / nginx TLS** + point `postharvest.space` DNS (public deploy still pending — stack currently runs on the laptop, LAN)
