@@ -243,8 +243,9 @@ def start_scrape_job(db, request: ScrapeRequest, owner_id: int | None = None) ->
             f"Too many URLs: {len(request.urls)} (max {settings.max_urls_per_job})"
         )
 
-    # Tier limits (Basic / Pro / Enterprise) — enforced server-side, on top
-    # of the global hard caps above. Unauthenticated/CLI jobs pass through.
+    # Tier limits (Basic / Pro / Team / Enterprise) — enforced server-side,
+    # on top of the global hard caps above. Unauthenticated/CLI jobs pass
+    # through.
     if owner_id is not None:
         from backend.core.plans import plan_limits
         from backend.models.user import User
@@ -252,7 +253,8 @@ def start_scrape_job(db, request: ScrapeRequest, owner_id: int | None = None) ->
         user = db.get(User, owner_id)
         if user is not None:
             limits = plan_limits(user.plan)
-            if len(request.urls) > limits["urls"]:
+            url_cap = limits["urls"]
+            if url_cap is not None and len(request.urls) > url_cap:
                 raise AppError(
                     f"Your {user.plan} plan allows up to {limits['urls']} "
                     "URL(s) per job",

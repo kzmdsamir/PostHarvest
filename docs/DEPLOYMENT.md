@@ -99,7 +99,7 @@ Key compose-level vars (all have defaults baked into the compose files):
 | `POSTGRES_USER/PASSWORD/DB` | postharvest/change-me/postharvest | DB credentials (set both the postgres image and the backend DSN) |
 | `COOKIE_ENCRYPTION_KEY` | *(empty)* | Fernet key for encrypting user FB cookies at rest (future) |
 | `WORKER_THREADS` | 4 | background scrape workers |
-| `MAX_URLS_PER_JOB` | 100 | URL limit per scrape request |
+| `MAX_URLS_PER_JOB` | 300 | URL limit per scrape request (global cap above plan ceilings) |
 | `SCRAPER_DELAY_SECONDS` | 2.5 | compliance throttle (do not lower in prod) |
 | `CORS_ORIGINS` | `["http://localhost:3000","http://127.0.0.1:3000"]` | browser origins that may call the API directly |
 | `NEXT_PUBLIC_API_URL` | *(empty)* | build-time backend origin from the *browser*'s view; **empty = same-origin via nginx** (the client already appends `/api` — never add it here) |
