@@ -7,7 +7,8 @@
     "prepare": "husky",
     "commitlint": "commitlint --from HEAD~1 --to HEAD --verbose",
     "release": "semantic-release",
-    "release:dry": "semantic-release --dry-run --no-ci"
+    "release:dry": "semantic-release --dry-run --no-ci",
+    "promote": "bash scripts/promote.sh"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.8.1",
