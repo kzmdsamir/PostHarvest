@@ -381,6 +381,7 @@ def test_capture_devtools_proxy_streams_asset(client, monkeypatch):
 
 def test_capture_ws_bridge_forwards_frames(client, monkeypatch):
     import asyncio
+    import threading
 
     record = _fake_live_record("cap-ws")
     browser_scraper._CAPTURES["me:ws"] = record
@@ -388,9 +389,12 @@ def test_capture_ws_bridge_forwards_frames(client, monkeypatch):
     class _FakeCDP:
         def __init__(self) -> None:
             self.received: list = []
+            self.received_both = threading.Event()
 
         async def send(self, message) -> None:  # noqa: ANN001
             self.received.append(message)
+            if len(self.received) >= 2:
+                self.received_both.set()
 
         def __aiter__(self):
             return self
@@ -415,9 +419,11 @@ def test_capture_ws_bridge_forwards_frames(client, monkeypatch):
         with client.websocket_connect("/api/accounts/capture/cap-ws/cdp") as ws:
             ws.send_text("hello")
             ws.send_text("world")
-            deadline = time.monotonic() + 1.0
-            while time.monotonic() < deadline and fake.received != ["hello", "world"]:
-                time.sleep(0.02)
+            # Event-driven wait instead of a fixed race window: the bridge forwards
+            # both frames sequentially on the server-side event loop, and the fake's
+            # send() sets the event when they all land. Falls back to a generous
+            # timeout only for genuinely stuck bridges.
+            assert fake.received_both.wait(timeout=10), f"frames not forwarded; got {fake.received!r}"
             assert fake.received == ["hello", "world"]
     finally:
         browser_scraper._CAPTURES.clear()
