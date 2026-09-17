@@ -21,7 +21,7 @@ export const EMPTY_DEFAULTS: ScrapeDefaults = {
 };
 
 export function readScrapeDefaults(): ScrapeDefaults {
-  const loaded = EMPTY_DEFAULTS;
+  const loaded: ScrapeDefaults = { ...EMPTY_DEFAULTS };
   try {
     const raw = window.localStorage.getItem(DEFAULTS_KEY);
     if (!raw) return loaded;
