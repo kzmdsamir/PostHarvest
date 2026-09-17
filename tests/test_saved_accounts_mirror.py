@@ -220,12 +220,9 @@ def test_capture_endpoint_returns_link(authed_client, monkeypatch):
     body = r.json()
     assert body["scope"] == "me"
     assert body["capture_id"] == "cap-1"
-    # The link is same-origin (composed from the request host) with the ws
-    # target pointing at the backend bridge — no CDP port anywhere in it.
-    assert body["url"].startswith(
-        "http://testserver/api/accounts/capture/cap-1/devtools/inspector.html"
-        "?ws=ws://testserver/api/accounts/capture/cap-1/cdp"
-    )
+    # The link is same-origin, points at the live login viewer, and carries no
+    # CDP port — the viewer derives its ws target from the page location.
+    assert body["url"] == "http://testserver/api/accounts/capture/cap-1/viewer"
 
 
 def test_capture_ops_scope_requires_ops_role(authed_client, monkeypatch):
@@ -319,10 +316,7 @@ def test_capture_viewer_link_uses_request_base(authed_client, monkeypatch):
     r = authed_client.post("/api/accounts/capture", json={"name": "x", "scope": "me"})
     assert r.status_code == 201
     url = r.json()["url"]
-    assert url.startswith(
-        "http://testserver/api/accounts/capture/cap-link-1/devtools/inspector.html"
-        "?ws=ws://testserver/api/accounts/capture/cap-link-1/cdp"
-    )
+    assert url == "http://testserver/api/accounts/capture/cap-link-1/viewer"
 
 
 def test_capture_devtools_proxy_404_when_unknown(client):
@@ -336,6 +330,32 @@ def test_capture_devtools_proxy_404_when_finished(client):
     browser_scraper._CAPTURES["me:finished"] = record
     try:
         assert client.get("/api/accounts/capture/cap-finished/devtools/inspector.html").status_code == 404
+    finally:
+        browser_scraper._CAPTURES.clear()
+
+
+def test_capture_viewer_page_404_when_unknown_or_finished(client):
+    assert client.get("/api/accounts/capture/unknown-id/viewer").status_code == 404
+    record = _fake_live_record("cap-viewer-done")
+    record["finished"] = True
+    browser_scraper._CAPTURES["me:done"] = record
+    try:
+        assert client.get("/api/accounts/capture/cap-viewer-done/viewer").status_code == 404
+    finally:
+        browser_scraper._CAPTURES.clear()
+
+
+def test_capture_viewer_page_served_for_live_capture(client):
+    browser_scraper._CAPTURES["me:live"] = _fake_live_record("cap-viewer-live")
+    try:
+        r = client.get("/api/accounts/capture/cap-viewer-live/viewer")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/html")
+        # self-contained live viewer: no external assets, ws derived in-page
+        assert "Live login" in r.text
+        assert "/api/accounts/capture/" in r.text
+        assert "Input.dispatchMouseEvent" in r.text
+        assert "Page.captureScreenshot" in r.text
     finally:
         browser_scraper._CAPTURES.clear()
 

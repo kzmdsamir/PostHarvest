@@ -23,6 +23,8 @@ Endpoints
 * DELETE /api/accounts/{scope}/{name}       — remove a session (scope + role gated)
 
 Capture viewer (capability-based, same-origin):
+* GET /api/accounts/capture/{id}/viewer           — the live login page viewer
+                                                   (screenshot stream + input pipe)
 * GET /api/accounts/capture/{id}/devtools/{path} — proxy the capture browser's
                                                    DevTools frontend assets
 * GET /api/accounts/capture/{id}/json/{path}     — proxy Chrome CDP /json endpoints
@@ -38,10 +40,11 @@ import asyncio
 import httpx
 import websockets
 from fastapi import APIRouter, Depends, Request, Response, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from websockets.asyncio.client import ClientConnection, connect as _cdp_connect
 
+from backend.api.capture_viewer import VIEWER_HTML
 from backend.auth.dependencies import get_current_user
 from backend.core.config import get_settings
 from backend.core.database import get_db
@@ -89,21 +92,16 @@ def _capture_live(capture_id: str) -> bool:
 
 
 def _build_capture_link(request: Request, capture_id: str) -> str:
-    """Compose the same-origin DevTools viewer link for a live capture.
+    """Compose the same-origin live login viewer link for a capture.
 
-    The DevTools frontend is served by the backend (CDP proxy) and its ``ws=``
-    target is the backend's bridge, so the whole flow stays on the app's own
-    origin and scheme (``https``/``wss`` behind TLS, ``http``/``ws`` in dev) —
-    no CDP port is ever exposed. The unguessable ``capture_id`` gates access.
+    The viewer HTML is served by the backend (same origin) and derives its
+    websocket target from ``window.location``, so the whole flow stays on the
+    app's own origin and scheme (``https``/``wss`` behind TLS, ``http``/``ws``
+    in dev) — no CDP port is ever exposed. The unguessable ``capture_id``
+    gates access.
     """
     base = str(request.base_url).rstrip("/")
-    scheme = "wss" if request.base_url.scheme == "https" else "ws"
-    netloc = request.base_url.netloc
-    ws_url = f"{scheme}://{netloc}/api/accounts/capture/{capture_id}/cdp"
-    return (
-        f"{base}/api/accounts/capture/{capture_id}/devtools/inspector.html"
-        f"?ws={ws_url}"
-    )
+    return f"{base}/api/accounts/capture/{capture_id}/viewer"
 
 
 _PROXY_STRIP_HEADERS = frozenset(
@@ -425,6 +423,25 @@ async def capture_json_proxy(capture_id: str, path: str) -> StreamingResponse:
     if not _capture_live(capture_id):
         raise NotFoundError("Capture is not active or does not exist")
     return await _stream_upstream(f"{_cdp_base()}/json/{path}")
+
+
+@router.get(
+    "/accounts/capture/{capture_id}/viewer",
+    response_class=HTMLResponse,
+    summary="Serve the live login page viewer for an active capture",
+)
+async def capture_viewer_page(capture_id: str) -> HTMLResponse:
+    """Serve the embedded live-page viewer for an active capture.
+
+    The page shows the capture browser's actual Facebook page (screenshot
+    stream) and forwards the user's clicks/keys over the bridge, so opening a
+    capture is like a visible ``cli.py login`` browser — through the app. Like
+    every capture route, availability is gated on the unguessable
+    ``capture_id`` and on the capture still being live.
+    """
+    if not _capture_live(capture_id):
+        raise NotFoundError("Capture is not active or does not exist")
+    return HTMLResponse(VIEWER_HTML)
 
 
 @router.delete(

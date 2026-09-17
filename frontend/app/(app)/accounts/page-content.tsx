@@ -273,11 +273,10 @@ export default function AccountsPage() {
         title={addScope === "ops" ? "Add shared Facebook session" : "Add my Facebook session"}
         description={
           capture
-            ? "A one-time login browser is ready. Open it, sign in to Facebook, and this window closes itself once the session is saved."
-            : "You'll sign in to Facebook in a new tab (solving any CAPTCHA there) — only the resulting session cookies are stored with your account, never the password."
+            ? "A one-time login browser is ready — open it to see the live Facebook page and sign in there."
+            : "You'll sign in to Facebook in a new tab on the live page (solving any CAPTCHA there) — only the resulting session cookies are stored with your account, never the password."
         }
         size="lg"
-        className="min-h-[min(60vh,420px)]"
       >
         {!capture ? (
           <div className="space-y-4">
@@ -296,8 +295,9 @@ export default function AccountsPage() {
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                Opens Facebook&lsquo;s login page in a one-time browser hosted by this app — the link works from any
-                device, no extra ports. You complete the sign-in; this app only captures the session cookie.
+                Opens Facebook&lsquo;s live login page in a one-time browser hosted by this app — the page and your
+                clicks stream through the app&lsquo;s own connection, so it works from any device with no extra ports.
+                You complete the sign-in; this app only captures the session cookie.
               </p>
               {addError ? (
                 <p className="rounded-sm border border-red-700/40 bg-red-700/10 px-3 py-2 text-xs text-red-700">
@@ -324,8 +324,9 @@ export default function AccountsPage() {
                   Waiting for you to sign in…
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  The session arrives automatically once you finish logging in (up to ~4 minutes). Keep this window
-                  open. If the login tab seems blank, make sure pop-ups are allowed and open it again.
+                  Sign in on the live page in the login tab. The session arrives automatically once you finish (up to
+                  ~4 minutes). Keep this window open. If the login tab looks blank, make sure pop-ups are allowed and
+                  open it again.
                 </p>
               </div>
               {addError ? (
