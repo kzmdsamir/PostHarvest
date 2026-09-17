@@ -70,7 +70,9 @@ promote() {
 
   git push origin "$dst"
   say "pushed $dst"
-  [[ "$dst" == master ]] && say "master pushed — semantic-release will tag the release in CI"
+  if [[ "$dst" == master ]]; then
+    say "master pushed — semantic-release will tag the release in CI"
+  fi
 }
 
 for ((i = start_idx; i < ${#LADDER[@]} - 1; i++)); do
